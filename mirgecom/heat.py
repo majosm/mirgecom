@@ -43,14 +43,14 @@ from meshmode.dof_array import thaw
 from grudge.symbolic.primitives import TracePair
 from grudge.eager import interior_trace_pair, cross_rank_trace_pairs
 
-def _q_flux(discr, alpha, w_tpair):
-    actx = w_tpair.int[0].array_context
+def _q_flux(discr, alpha, u_tpair):
+    actx = u_tpair.int[0].array_context
 
-    normal = thaw(actx, discr.normal(w_tpair.dd))
+    normal = thaw(actx, discr.normal(u_tpair.dd))
 
-    flux_weak = math.sqrt(alpha)*w_tpair.avg*normal
+    flux_weak = math.sqrt(alpha)*u_tpair.avg*normal
 
-    return discr.project(w_tpair.dd, "all_faces", flux_weak)
+    return discr.project(u_tpair.dd, "all_faces", flux_weak)
 
 
 def _flux(discr, alpha, q_tpair):
@@ -73,26 +73,33 @@ def heat_operator(discr, alpha, w):
     alpha: float
         the (constant) diffusivity
     w: numpy.ndarray
-        an object array of DOF arrays, representing the state vector
+        an object array containing the DOF array state vector
 
     Returns
     -------
     numpy.ndarray
-        an object array of DOF arrays, representing the ODE RHS
+        an object array containing the DOF array RHS vector
     """
-    u = w[0]
+    u = w
 
-    actx = u.array_context
+    actx = u[0].array_context
 
-    grad_u = discr.weak_grad(u)
-    q_flux = (_q_flux(discr, alpha=alpha, w_tpair=interior_trace_pair(discr, w)) +
-                sum(
-                    _q_flux(discr, alpha=alpha, w_tpair=tpair)
-                    for tpair in cross_rank_trace_pairs(discr, w)
-                )
+    dir_u = discr.project("vol", BTAG_ALL, u)
+
+    q = discr.inverse_mass(
+        -math.sqrt(alpha)*discr.weak_grad(u[0])
+        +  # noqa: W504
+        discr.face_mass(
+            _q_flux(discr, alpha=alpha, u_tpair=interior_trace_pair(discr, u))
+            + _q_flux(discr, alpha=alpha,
+                u_tpair=TracePair(BTAG_ALL, interior=dir_u, exterior=-dir_u))
+            + sum(
+                _q_flux(discr, alpha=alpha, u_tpair=tpair)
+                for tpair in cross_rank_trace_pairs(discr, u)
             )
+        ))
 
-    q = discr.inverse_mass(-math.sqrt(alpha)*grad_u + discr.face_mass(q_flux))
+    dir_q = discr.project("vol", BTAG_ALL, q)
 
     return (
         discr.inverse_mass(
@@ -100,6 +107,8 @@ def heat_operator(discr, alpha, w):
             +  # noqa: W504
             discr.face_mass(
                 _flux(discr, alpha=alpha, q_tpair=interior_trace_pair(discr, q))
+                + _flux(discr, alpha=alpha,
+                    q_tpair=TracePair(BTAG_ALL, interior=dir_q, exterior=dir_q))
                 + sum(
                     _flux(discr, alpha=alpha, q_tpair=tpair)
                     for tpair in cross_rank_trace_pairs(discr, q))
