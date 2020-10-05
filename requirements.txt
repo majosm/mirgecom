@@ -1,5 +1,4 @@
 mpi4py
-numpy
 pytest
 pyvisfile
 pymetis
