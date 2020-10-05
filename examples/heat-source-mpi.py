@@ -71,7 +71,7 @@ def main():
     mesh_dist = MPIMeshDistributor(comm)
 
     dim = 2
-    nel_1d = 32
+    nel_1d = 16
 
     if mesh_dist.is_mananger_rank():
         from meshmode.mesh.generation import generate_regular_rect_mesh
@@ -98,10 +98,10 @@ def main():
 
     if dim == 2:
         # no deep meaning here, just a fudge factor
-        dt = 0.05/(nel_1d*order**2)
+        dt = 0.002/(nel_1d*order**2)
     elif dim == 3:
         # no deep meaning here, just a fudge factor
-        dt = 0.03/(nel_1d*order**2)
+        dt = 0.001/(nel_1d*order**2)
     else:
         raise ValueError("don't have a stable time step guesstimate")
 
