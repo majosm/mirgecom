@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_decaying_cosine(dim):
+    # 1D: u(x,t) = exp(-alpha*t)*cos(x)
     # 2D: u(x,y,t) = exp(-2*alpha*t)*cos(x)*cos(y)
     # 3D: u(x,y,z,t) = exp(-3*alpha*t)*cos(x)*cos(y)*cos(z)
     # on [-pi/2, pi/2]^{#dims}
