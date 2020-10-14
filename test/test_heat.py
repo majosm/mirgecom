@@ -91,13 +91,13 @@ def sym_heat(dim, sym_u):
     return sym_f, sym_rhs
 
 
+@pytest.mark.parametrize("order", [2, 3, 4])
 @pytest.mark.parametrize("problem",
     [
         get_decaying_cosine(1),
         get_decaying_cosine(2),
         get_decaying_cosine(3)
     ])
-@pytest.mark.parametrize("order", [2, 3, 4])
 def test_heat_accuracy(actx_factory, problem, order, visualize=False):
     """Checks accuracy of the heat operator for a given problem setup.
     """
