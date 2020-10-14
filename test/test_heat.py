@@ -28,7 +28,7 @@ import pymbolic as pmbl
 import pymbolic.primitives as prim
 import mirgecom.symbolic as sym
 from mirgecom.heat import heat_operator
-from meshmode.dof_array import thaw
+from meshmode.dof_array import thaw, flat_norm
 
 from meshmode.array_context import (  # noqa
     pytest_generate_tests_for_pyopencl_array_context
@@ -60,7 +60,7 @@ def get_decaying_cosine(dim):
             a=(-0.5*np.pi,)*dim,
             b=(0.5*np.pi,)*dim,
             n=(n,)*dim)
-    alpha = 2.
+    alpha = 1.
     sym_coords = prim.make_sym_vector("x", dim)
     sym_t = pmbl.var("t")
     sym_cos = pmbl.var("cos")
@@ -95,8 +95,8 @@ def sym_heat(dim, sym_u):
 @pytest.mark.parametrize("problem",
     [
         get_decaying_cosine(1),
-        get_decaying_cosine(2),
-        get_decaying_cosine(3)
+#         get_decaying_cosine(2),
+#         get_decaying_cosine(3)
     ])
 def test_heat_accuracy(actx_factory, problem, order, visualize=False):
     """Checks accuracy of the heat operator for a given problem setup.
@@ -143,6 +143,59 @@ def test_heat_accuracy(actx_factory, problem, order, visualize=False):
                             ("rhs_actual", rhs[0]),
                             ("rhs_expected", expected_rhs[0]),
                             ])
+
+    print("Approximation error:")
+    print(eoc_rec)
+    assert(eoc_rec.order_estimate() >= order - 0.5 or eoc_rec.max_error() < 1e-11)
+
+
+@pytest.mark.parametrize("order", [1, 2, 3, 4])
+@pytest.mark.parametrize("problem",
+    [
+        get_decaying_cosine(1)
+    ])
+def test_heat_accuracy_nodaldg(actx_factory, problem, order):
+    actx = actx_factory()
+
+    dim, alpha, mesh_factory, sym_u = problem
+
+    assert dim == 1
+
+    _, sym_rhs = sym_heat(dim, sym_u)
+
+    from pytools.convergence import EOCRecorder
+    eoc_rec = EOCRecorder()
+
+    for n in [4, 8, 16, 32, 64, 128]:
+        mesh = mesh_factory(n)
+
+        from meshmode.interop.nodal_dg import NodalDGContext
+        with NodalDGContext("../../nodal-dg/Codes1.1") as ndgctx:
+
+            ndgctx.set_mesh(mesh, order=order)
+
+            discr = ndgctx.get_discr(actx)
+
+            nodes = thaw(actx, discr.nodes())
+
+            def sym_eval(expr, t):
+                return sym.EvaluationMapper({"alpha": alpha, "x": nodes, "t": t})(expr)
+
+            t_check = 1.23456789
+
+            fields = make_obj_array([sym_eval(sym_u, t_check)])
+
+            ndgctx.push_dof_array("u", fields[0])
+            ndgctx.octave.push("t_check", t_check)
+            ndgctx.octave.eval("[rhs] = HeatCRHS1D(u,t_check)", verbose=False)
+            rhs = make_obj_array([ndgctx.pull_dof_array(actx, "rhs")])
+
+            expected_rhs = make_obj_array([sym_eval(sym_rhs, t_check)])
+
+            rel_linf_err = (
+                flat_norm(rhs[0] - expected_rhs[0], np.inf)
+                / flat_norm(expected_rhs[0], np.inf))
+            eoc_rec.add_data_point(1./n, rel_linf_err)
 
     print("Approximation error:")
     print(eoc_rec)
