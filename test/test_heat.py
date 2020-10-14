@@ -93,6 +93,7 @@ def sym_heat(dim, sym_u):
 
 @pytest.mark.parametrize("problem",
     [
+        get_decaying_cosine(1),
         get_decaying_cosine(2),
         get_decaying_cosine(3)
     ])
