@@ -135,7 +135,7 @@ def test_heat_accuracy(actx_factory, problem, order, visualize=False):
 
         if visualize:
             from grudge.shortcuts import make_visualizer
-            vis = make_visualizer(discr, discr.order)
+            vis = make_visualizer(discr, discr.order+3)
             vis.write_vtk_file("heat_accuracy_{order}_{n}.vtu".format(order=order,
                         n=n), [
                             ("u", fields[0]),
