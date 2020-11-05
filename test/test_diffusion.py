@@ -39,7 +39,9 @@ from meshmode.array_context import (  # noqa
 import pytest
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Union
+from numbers import Number
+from functools import partial
 
 import logging
 logger = logging.getLogger(__name__)
@@ -53,23 +55,40 @@ class HeatProblem:
 
         The problem dimension.
 
-    .. attribute:: alpha
-
-        The diffusivity.
-
     .. attribute:: get_mesh
 
         A function that creates a mesh when given some characteristic size as input.
 
+    .. attribute:: sym_alpha
+
+        A symbolic expression for the diffusivity.
+
     .. attribute:: sym_u
 
-        A symbolic expresssion for the solution.
+        A symbolic expression for the solution.
     """
 
     dim: int
-    alpha: float
     get_mesh: Callable
+    sym_alpha: Union[prim.Expression, Number]
     sym_u: prim.Expression
+
+
+def get_trig_mesh(dim, n):
+    dim_names = ["x", "y", "z"]
+    neumann_boundaries = []
+    for i in range(dim-1):
+        neumann_boundaries += ["+"+dim_names[i], "-"+dim_names[i]]
+    dirichlet_boundaries = ["+"+dim_names[dim-1], "-"+dim_names[dim-1]]
+    from meshmode.mesh.generation import generate_regular_rect_mesh
+    return generate_regular_rect_mesh(
+        a=(-0.5*np.pi,)*dim,
+        b=(0.5*np.pi,)*dim,
+        n=(n,)*dim,
+        boundary_tag_to_face={
+            "dirichlet": dirichlet_boundaries,
+            "neumann": neumann_boundaries
+            })
 
 
 def get_decaying_trig(dim, alpha):
@@ -77,21 +96,6 @@ def get_decaying_trig(dim, alpha):
     # 2D: u(x,y,t) = exp(-2*alpha*t)*sin(x)*cos(y)
     # 3D: u(x,y,z,t) = exp(-3*alpha*t)*sin(x)*sin(y)*cos(z)
     # on [-pi/2, pi/2]^{#dims}
-    def get_mesh(n):
-        dim_names = ["x", "y", "z"]
-        neumann_boundaries = []
-        for i in range(dim-1):
-            neumann_boundaries += ["+"+dim_names[i], "-"+dim_names[i]]
-        dirichlet_boundaries = ["+"+dim_names[dim-1], "-"+dim_names[dim-1]]
-        from meshmode.mesh.generation import generate_regular_rect_mesh
-        return generate_regular_rect_mesh(
-            a=(-0.5*np.pi,)*dim,
-            b=(0.5*np.pi,)*dim,
-            n=(n,)*dim,
-            boundary_tag_to_face={
-                "dirichlet": dirichlet_boundaries,
-                "neumann": neumann_boundaries
-                })
     sym_coords = prim.make_sym_vector("x", dim)
     sym_t = pmbl.var("t")
     sym_cos = pmbl.var("cos")
@@ -101,14 +105,51 @@ def get_decaying_trig(dim, alpha):
     for i in range(dim-1):
         sym_u *= sym_sin(sym_coords[i])
     sym_u *= sym_cos(sym_coords[dim-1])
-    return HeatProblem(dim, alpha, get_mesh, sym_u)
+    return HeatProblem(dim, partial(get_trig_mesh, dim), alpha, sym_u)
 
 
-def sym_diffusion(dim, sym_u):
+def get_static_trig(dim, alpha):
+    # 1D: u(x,t) = cos(x)
+    # 2D: u(x,y,t) = sin(x)*cos(y)
+    # 3D: u(x,y,z,t) = sin(x)*sin(y)*cos(z)
+    # on [-pi/2, pi/2]^{#dims}
+    sym_coords = prim.make_sym_vector("x", dim)
+    sym_cos = pmbl.var("cos")
+    sym_sin = pmbl.var("sin")
+    sym_u = 1
+    for i in range(dim-1):
+        sym_u *= sym_sin(sym_coords[i])
+    sym_u *= sym_cos(sym_coords[dim-1])
+    return HeatProblem(dim, partial(get_trig_mesh, dim), alpha, sym_u)
+
+
+def get_static_trig_var_diff(dim):
+    # 1D: alpha(x) = 1+0.2*cos(3*x)
+    #       u(x,t) = cos(x)
+    # 2D: alpha(x,y) = 1+0.2*cos(3*x)*cos(3*y)
+    #       u(x,y,t) = sin(x)*cos(y)
+    # 3D: alpha(x,y,z) = 1+0.2*cos(3*x)*cos(3*y)*cos(3*z)
+    #       u(x,y,z,t) = sin(x)*sin(y)*cos(z)
+    # on [-pi/2, pi/2]^{#dims}
+    # with alpha
+    sym_coords = prim.make_sym_vector("x", dim)
+    sym_cos = pmbl.var("cos")
+    sym_sin = pmbl.var("sin")
+    sym_alpha = 1
+    for i in range(dim):
+        sym_alpha *= sym_cos(3.*sym_coords[i])
+    sym_alpha = 1 + 0.2*sym_alpha
+    sym_u = 1
+    for i in range(dim-1):
+        sym_u *= sym_sin(sym_coords[i])
+    sym_u *= sym_cos(sym_coords[dim-1])
+    return HeatProblem(dim, partial(get_trig_mesh, dim), sym_alpha, sym_u)
+
+
+def sym_diffusion(dim, sym_alpha, sym_u):
     """Return a symbolic expression for the diffusion operator applied to a function.
     """
-    sym_alpha = pmbl.var("alpha")
-    return sym_alpha * sym.div(sym.grad(dim, sym_u))
+    return sym.div([sym_alpha * grad_i for grad_i in sym.grad(dim, sym_u)])
 
 
 def get_boundaries():
@@ -155,6 +196,9 @@ def get_boundaries():
         (get_decaying_trig(1, 2.), 50, 5.e-5),
         (get_decaying_trig(2, 2.), 50, 5.e-5),
         (get_decaying_trig(3, 2.), 50, 5.e-5),
+        (get_static_trig_var_diff(1), 50, 5.e-5),
+        (get_static_trig_var_diff(2), 50, 5.e-5),
+        (get_static_trig_var_diff(3), 50, 5.e-5),
     ])
 def test_diffusion_accuracy(actx_factory, problem, nsteps, dt, order,
             visualize=False):
@@ -166,7 +210,7 @@ def test_diffusion_accuracy(actx_factory, problem, nsteps, dt, order,
 
     p = problem
 
-    sym_diffusion_u = sym_diffusion(p.dim, p.sym_u)
+    sym_diffusion_u = sym_diffusion(p.dim, p.sym_alpha, p.sym_u)
 
     # In order to support manufactured solutions, we modify the heat equation
     # to add a source term f. If the solution is exact, this term should be 0.
@@ -182,20 +226,36 @@ def test_diffusion_accuracy(actx_factory, problem, nsteps, dt, order,
         mesh = p.get_mesh(n)
 
         from grudge.eager import EagerDGDiscretization
-        discr = EagerDGDiscretization(actx, mesh, order=order)
+        from grudge.symbolic.primitives import QTAG_NONE
+        from meshmode.discretization.poly_element import \
+                QuadratureSimplexGroupFactory, \
+                PolynomialWarpAndBlendGroupFactory
+        discr = EagerDGDiscretization(actx, mesh,
+                quad_tag_to_group_factory={
+                    QTAG_NONE: PolynomialWarpAndBlendGroupFactory(order),
+                    "var_diff": QuadratureSimplexGroupFactory(3*order),
+                    })
 
         nodes = thaw(actx, discr.nodes())
 
         def sym_eval(expr, t):
-            return sym.EvaluationMapper({"alpha": p.alpha, "x": nodes, "t": t})(expr)
-
-        def get_rhs(t, u):
-            result = (diffusion_operator(discr, alpha=p.alpha,
-                    u_boundaries=u_boundaries, q_boundaries=q_boundaries, u=u)
-                + sym_eval(sym_f, t))
-            return result
+            return sym.EvaluationMapper({"x": nodes, "t": t})(expr)
 
         t = 0.
+
+        alpha = sym_eval(p.sym_alpha, t)
+        if isinstance(alpha, DOFArray):
+            var_diff_quad_tag = "var_diff"
+        else:
+            alpha = discr.zeros(actx) + alpha
+            var_diff_quad_tag = None
+
+        def get_rhs(t, u):
+            result = (diffusion_operator(discr, var_diff_quad_tag=var_diff_quad_tag,
+                    alpha=alpha, u_boundaries=u_boundaries,
+                    q_boundaries=q_boundaries, u=u)
+                + sym_eval(sym_f, t))
+            return result
 
         u = sym_eval(p.sym_u, t)
 
@@ -204,6 +264,16 @@ def test_diffusion_accuracy(actx_factory, problem, nsteps, dt, order,
         for istep in range(nsteps):
             u = rk4_step(u, t, dt, get_rhs)
             t += dt
+            expected_fields = make_obj_array([sym_eval(p.sym_u, t)])
+            if istep % 10 == 0 and visualize:
+                from grudge.shortcuts import make_visualizer
+                vis = make_visualizer(discr, discr.order+3)
+                vis.write_vtk_file("diffusion_accuracy_{order}_{n}_{istep}.vtu".format(
+                    order=order, n=n, istep=istep), [
+                        ("alpha", alpha),
+                        ("u", fields[0]),
+                        ("expected_u", expected_fields[0]),
+                        ])
 
         expected_u = sym_eval(p.sym_u, t)
 
@@ -244,12 +314,12 @@ def test_diffusion_compare_to_nodal_dg(actx_factory, problem, order,
     p = problem
 
     assert p.dim == 1
-    assert p.alpha == 1.
+    assert p.sym_alpha == 1.
 
     from meshmode.interop.nodal_dg import download_nodal_dg_if_not_present
     download_nodal_dg_if_not_present()
 
-    sym_diffusion_u = sym_diffusion(p.dim, p.sym_u)
+    sym_diffusion_u = sym_diffusion(p.dim, p.sym_alpha, p.sym_u)
 
     u_boundaries, q_boundaries = get_boundaries()
 
@@ -267,20 +337,21 @@ def test_diffusion_compare_to_nodal_dg(actx_factory, problem, order,
             nodes_mirgecom = thaw(actx, discr_mirgecom.nodes())
 
             def sym_eval_mirgecom(expr):
-                return sym.EvaluationMapper({"alpha": p.alpha, "x": nodes_mirgecom,
-                            "t": t})(expr)
+                return sym.EvaluationMapper({"x": nodes_mirgecom, "t": t})(expr)
+
+            alpha_mirgecom = discr_mirgecom.zeros(actx) + 1.
 
             u_mirgecom = sym_eval_mirgecom(p.sym_u)
 
-            diffusion_u_mirgecom = diffusion_operator(discr_mirgecom, alpha=p.alpha,
-                u_boundaries=u_boundaries, q_boundaries=q_boundaries, u=u_mirgecom)
+            diffusion_u_mirgecom = diffusion_operator(discr_mirgecom,
+                alpha=alpha_mirgecom, u_boundaries=u_boundaries,
+                q_boundaries=q_boundaries, u=u_mirgecom)
 
             discr_ndg = ndgctx.get_discr(actx)
             nodes_ndg = thaw(actx, discr_ndg.nodes())
 
             def sym_eval_ndg(expr):
-                return sym.EvaluationMapper({"alpha": p.alpha, "x": nodes_ndg,
-                            "t": t})(expr)
+                return sym.EvaluationMapper({"x": nodes_ndg, "t": t})(expr)
 
             u_ndg = sym_eval_ndg(p.sym_u)
 
@@ -313,8 +384,8 @@ def test_diffusion_obj_array_vectorize(actx_factory):
     sym_u1 = p.sym_u
     sym_u2 = 2*p.sym_u
 
-    sym_diffusion_u1 = sym_diffusion(p.dim, sym_u1)
-    sym_diffusion_u2 = sym_diffusion(p.dim, sym_u2)
+    sym_diffusion_u1 = sym_diffusion(p.dim, p.sym_alpha, sym_u1)
+    sym_diffusion_u2 = sym_diffusion(p.dim, p.sym_alpha, sym_u2)
 
     u_boundaries, q_boundaries = get_boundaries()
 
@@ -330,12 +401,16 @@ def test_diffusion_obj_array_vectorize(actx_factory):
     t = 1.23456789
 
     def sym_eval(expr):
-        return sym.EvaluationMapper({"alpha": p.alpha, "x": nodes, "t": t})(expr)
+        return sym.EvaluationMapper({"x": nodes, "t": t})(expr)
+
+    alpha = sym_eval(p.sym_alpha)
+    if not isinstance(alpha, DOFArray):
+        alpha = discr.zeros(actx) + alpha
 
     u1 = sym_eval(sym_u1)
     u2 = sym_eval(sym_u2)
 
-    diffusion_u1 = diffusion_operator(discr, alpha=p.alpha,
+    diffusion_u1 = diffusion_operator(discr, alpha=alpha,
         u_boundaries=u_boundaries, q_boundaries=q_boundaries, u=u1)
 
     assert isinstance(diffusion_u1, DOFArray)
@@ -350,7 +425,7 @@ def test_diffusion_obj_array_vectorize(actx_factory):
     q_boundaries_vector = make_obj_array([q_boundaries, q_boundaries])
     u_vector = make_obj_array([u1, u2])
 
-    diffusion_u_vector = diffusion_operator(discr, alpha=p.alpha,
+    diffusion_u_vector = diffusion_operator(discr, alpha=alpha,
         u_boundaries=u_boundaries_vector, q_boundaries=q_boundaries_vector,
         u=u_vector)
 

@@ -33,22 +33,55 @@ import numpy.linalg as la  # noqa
 from pytools.obj_array import make_obj_array, obj_array_vectorize_n_args
 from meshmode.mesh import BTAG_ALL, BTAG_NONE  # noqa
 from meshmode.dof_array import thaw
+from grudge.symbolic.primitives import DOFDesc, QTAG_NONE
 from grudge.eager import interior_trace_pair, cross_rank_trace_pairs
 
 
-def _q_flux(discr, alpha, u_tpair):
-    normal = thaw(u_tpair.int.array_context, discr.normal(u_tpair.dd))
-    flux_weak = make_obj_array([math.sqrt(alpha)*u_tpair.avg])*normal
-    return discr.project(u_tpair.dd, "all_faces", flux_weak)
+def _q_flux(discr, var_diff_quad_tag, alpha, u_tpair):
+    actx = u_tpair.int.array_context
+
+    dd = u_tpair.dd
+    if var_diff_quad_tag is QTAG_NONE:
+        dd_quad = dd
+    else:
+        dd_quad = dd.with_qtag(var_diff_quad_tag)
+
+    normal = thaw(actx, discr.normal(dd))
+
+    flux_weak = make_obj_array([-u_tpair.avg])*normal
+
+    dd_allfaces_quad = dd_quad.with_dtag("all_faces")
+    alpha_quad = discr.project("vol", dd_quad, alpha)
+    sqrt_alpha_quad = actx.np.sqrt(alpha_quad)
+    flux_quad = discr.project(dd, dd_quad, flux_weak)
+
+    return discr.project(dd_quad, dd_allfaces_quad, make_obj_array([sqrt_alpha_quad])
+                * flux_quad)
 
 
-def _u_flux(discr, alpha, q_tpair):
-    normal = thaw(q_tpair.int[0].array_context, discr.normal(q_tpair.dd))
-    flux_weak = math.sqrt(alpha)*np.dot(q_tpair.avg, normal)
-    return discr.project(q_tpair.dd, "all_faces", flux_weak)
+def _u_flux(discr, var_diff_quad_tag, alpha, q_tpair):
+    actx = q_tpair.int[0].array_context
+
+    dd = q_tpair.dd
+    if var_diff_quad_tag is QTAG_NONE:
+        dd_quad = dd
+    else:
+        dd_quad = dd.with_qtag(var_diff_quad_tag)
+
+    normal = thaw(actx, discr.normal(dd))
+
+    flux_weak = np.dot(-q_tpair.avg, normal)
+
+    dd_allfaces_quad = dd_quad.with_dtag("all_faces")
+    alpha_quad = discr.project("vol", dd_quad, alpha)
+    sqrt_alpha_quad = actx.np.sqrt(alpha_quad)
+    flux_quad = discr.project(dd, dd_quad, flux_weak)
+
+    return discr.project(dd_quad, dd_allfaces_quad, sqrt_alpha_quad * flux_quad)
 
 
-def diffusion_operator(discr, alpha, u_boundaries, q_boundaries, u):
+def diffusion_operator(discr, alpha, u_boundaries, q_boundaries, u,
+            var_diff_quad_tag=QTAG_NONE):
     r"""
     Compute the diffusion operator.
 
@@ -60,8 +93,8 @@ def diffusion_operator(discr, alpha, u_boundaries, q_boundaries, u):
     ----------
     discr: grudge.eager.EagerDGDiscretization
         the discretization to use
-    alpha: float
-        the (constant) diffusivity
+    alpha: meshmode.dof_array.DOFArray
+        the diffusivities
     u_boundaries:
         dictionary (or object array of dictionaries) of boundary functions for *u*,
         one for each valid btag
@@ -71,6 +104,9 @@ def diffusion_operator(discr, alpha, u_boundaries, q_boundaries, u):
     u: meshmode.dof_array.DOFArray or numpy.ndarray
         the DOF array or object array of DOF arrays to which the operator should be
         applied
+    var_diff_quad_tag:
+        tag indicating which quadrature discretization in *discr* to use for
+        overintegration (required for variable diffusivity)
 
     Returns
     -------
@@ -86,33 +122,56 @@ def diffusion_operator(discr, alpha, u_boundaries, q_boundaries, u):
             diffusion_operator(discr, alpha, u_boundaries_i, q_boundaries_i, u_i),
             u_boundaries, q_boundaries, u)
 
-    q = discr.inverse_mass(
-        -math.sqrt(alpha)*discr.weak_grad(u)
+    actx = u.array_context
+
+    dd_quad = DOFDesc("vol", var_diff_quad_tag)
+    alpha_quad = discr.project("vol", dd_quad, alpha)
+    sqrt_alpha_quad = actx.np.sqrt(alpha_quad)
+    u_quad = discr.project("vol", dd_quad, u)
+
+    dd_allfaces_quad = DOFDesc("all_faces", var_diff_quad_tag)
+
+    q = (
+        discr.grad(-actx.np.sqrt(alpha))*make_obj_array([u])  # not sure how to do overintegration here
         +  # noqa: W504
-        discr.face_mass(
-            _q_flux(discr, alpha=alpha, u_tpair=interior_trace_pair(discr, u))
-            + sum(
-                _q_flux(discr, alpha=alpha, u_tpair=u_boundaries[btag](discr, u))
-                for btag in u_boundaries
-            )
-            + sum(
-                _q_flux(discr, alpha=alpha, u_tpair=tpair)
-                for tpair in cross_rank_trace_pairs(discr, u)
-            )
-        ))
+        discr.inverse_mass(
+            discr.weak_grad(dd_quad, -sqrt_alpha_quad*u_quad)
+            -  # noqa: W504
+            discr.face_mass(
+                dd_allfaces_quad,
+                _q_flux(discr, var_diff_quad_tag, alpha,
+                    u_tpair=interior_trace_pair(discr, u))
+                + sum(
+                    _q_flux(discr, var_diff_quad_tag, alpha=alpha,
+                        u_tpair=u_boundaries[btag](discr, u))
+                    for btag in u_boundaries
+                )
+                + sum(
+                    _q_flux(discr, var_diff_quad_tag, alpha,
+                        u_tpair=tpair)
+                    for tpair in cross_rank_trace_pairs(discr, u)
+                )
+            ))
+        )
+
+    q_quad = discr.project("vol", dd_quad, q)
 
     return (
         discr.inverse_mass(
-            -math.sqrt(alpha)*discr.weak_div(q)
-            +  # noqa: W504
+            discr.weak_div(dd_quad, make_obj_array([-sqrt_alpha_quad])*q_quad)
+            -  # noqa: W504
             discr.face_mass(
-                _u_flux(discr, alpha=alpha, q_tpair=interior_trace_pair(discr, q))
+                dd_allfaces_quad,
+                _u_flux(discr, var_diff_quad_tag, alpha,
+                    q_tpair=interior_trace_pair(discr, q))
                 + sum(
-                    _u_flux(discr, alpha=alpha, q_tpair=q_boundaries[btag](discr, q))
+                    _u_flux(discr, var_diff_quad_tag, alpha=alpha,
+                        q_tpair=q_boundaries[btag](discr, q))
                     for btag in q_boundaries
                 )
                 + sum(
-                    _u_flux(discr, alpha=alpha, q_tpair=tpair)
+                    _u_flux(discr, var_diff_quad_tag, alpha,
+                        q_tpair=tpair)
                     for tpair in cross_rank_trace_pairs(discr, q))
                 )
             )
