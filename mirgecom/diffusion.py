@@ -127,14 +127,15 @@ def diffusion_operator(discr, alpha, u_boundaries, q_boundaries, u,
     dd_quad = DOFDesc("vol", var_diff_quad_tag)
     alpha_quad = discr.project("vol", dd_quad, alpha)
     sqrt_alpha_quad = actx.np.sqrt(alpha_quad)
+    grad_alpha_quad = discr.project("vol", dd_quad, discr.grad(alpha))
     u_quad = discr.project("vol", dd_quad, u)
 
     dd_allfaces_quad = DOFDesc("all_faces", var_diff_quad_tag)
 
-    q = (
-        discr.grad(-actx.np.sqrt(alpha))*make_obj_array([u])  # not sure how to do overintegration here
-        +  # noqa: W504
-        discr.inverse_mass(
+    q = discr.inverse_mass(
+            discr.mass(dd_quad, make_obj_array([-0.5/sqrt_alpha_quad])
+                * grad_alpha_quad * make_obj_array([u_quad]))
+            +  # noqa: W504
             discr.weak_grad(dd_quad, -sqrt_alpha_quad*u_quad)
             -  # noqa: W504
             discr.face_mass(
@@ -152,7 +153,6 @@ def diffusion_operator(discr, alpha, u_boundaries, q_boundaries, u,
                     for tpair in cross_rank_trace_pairs(discr, u)
                 )
             ))
-        )
 
     q_quad = discr.project("vol", dd_quad, q)
 

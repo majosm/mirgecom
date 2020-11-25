@@ -193,12 +193,12 @@ def get_boundaries():
 @pytest.mark.parametrize("order", [2, 3])
 @pytest.mark.parametrize(("problem", "nsteps", "dt"),
     [
-        (get_decaying_trig(1, 2.), 50, 5.e-5),
-        (get_decaying_trig(2, 2.), 50, 5.e-5),
-        (get_decaying_trig(3, 2.), 50, 5.e-5),
+#         (get_decaying_trig(1, 2.), 50, 5.e-5),
+#         (get_decaying_trig(2, 2.), 50, 5.e-5),
+#         (get_decaying_trig(3, 2.), 50, 5.e-5),
         (get_static_trig_var_diff(1), 50, 5.e-5),
-        (get_static_trig_var_diff(2), 50, 5.e-5),
-        (get_static_trig_var_diff(3), 50, 5.e-5),
+#         (get_static_trig_var_diff(2), 50, 5.e-5),
+#         (get_static_trig_var_diff(3), 50, 5.e-5),
     ])
 def test_diffusion_accuracy(actx_factory, problem, nsteps, dt, order,
             visualize=False):
