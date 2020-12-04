@@ -39,16 +39,18 @@ from grudge.shortcuts import make_visualizer
 
 from mirgecom.euler import (
     inviscid_operator,
-    #    split_conserved
+    split_conserved,
+    get_extra_init as get_extra_init_euler,
+    get_extra_status as get_extra_status_euler,
 )
 from mirgecom.simutil import (
-    inviscid_sim_timestep,
     create_parallel_grid,
     sim_checkpoint,
-    ExactSolutionMismatch,
 )
-
-from mirgecom.io import make_init_message
+from mirgecom.io import (
+    make_init_message,
+    write_visualization_file,
+)
 
 from mirgecom.integrators import rk4_step
 from mirgecom.steppers import advance_state
@@ -130,52 +132,50 @@ def main(ctx_factory=cl.create_some_context):
 
     visualizer = make_visualizer(discr, order + 3 if dim == 2 else order)
 
-    initname = "pulse"
-    eosname = eos.__class__.__name__
-    init_message = make_init_message(dim=dim, order=order,
+    extra_init = get_extra_init_euler(
+        cfl=current_cfl,
+        constant_cfl=constant_cfl,
+        initname="pulse",
+        eosname=eos.__class__.__name__)
+    init_message = make_init_message(dim=dim, order=order, casename=casename,
                                      nelements=local_nelements,
                                      global_nelements=global_nelements,
                                      dt=current_dt, t_final=t_final, nstatus=nstatus,
-                                     nviz=nviz, cfl=current_cfl,
-                                     constant_cfl=constant_cfl, initname=initname,
-                                     eosname=eosname, casename=casename)
+                                     nviz=nviz, extra_init=extra_init)
     if rank == 0:
         logger.info(init_message)
 
-    get_timestep = partial(inviscid_sim_timestep, discr=discr, t=current_t,
-                           dt=current_dt, cfl=current_cfl, eos=eos,
-                           t_final=t_final, constant_cfl=constant_cfl)
+    def get_timestep(state):
+        return get_inviscid_timestep(discr=discr, q=state, cfl=current_cfl,
+            eos=eos) if constant_cfl else current_dt
 
-    def my_rhs(t, state):
+    def rhs(t, state):
         return inviscid_operator(discr, q=state, t=t,
                                  boundaries=boundaries, eos=eos)
 
-    def my_checkpoint(step, t, dt, state):
-        return sim_checkpoint(discr, visualizer, eos, q=state,
-                              vizname=casename, step=step,
-                              t=t, dt=dt, nstatus=nstatus, nviz=nviz,
-                              exittol=exittol, constant_cfl=constant_cfl, comm=comm)
+    def write_vis(step, t, state):
+        cv = split_conserved(dim, state)
+        io_fields = [
+            ("cv", cv),
+            ("dv", eos.dependent_vars(cv)),
+        ]
+        return write_visualization_file(visualizer, fields=io_fields,
+                    basename=casename, step=step, t=t, comm=comm)
 
-    try:
-        (current_step, current_t, current_state) = \
-            advance_state(rhs=my_rhs, timestepper=timestepper,
-                          checkpoint=my_checkpoint,
-                          get_timestep=get_timestep, state=current_state,
-                          t=current_t, t_final=t_final)
-    except ExactSolutionMismatch as ex:
-        current_step = ex.step
-        current_t = ex.t
-        current_state = ex.state
+    def checkpoint(step, t, dt, state):
+        get_extra_status = partial(get_extra_status_euler, discr=discr, eos=eos)
+        return sim_checkpoint(state=state, step=step, t=t, dt=dt, nstatus=nstatus,
+            get_extra_status=get_extra_status, nviz=nviz, write_vis=write_vis,
+            comm=comm)
 
-    #    if current_t != checkpoint_t:
+    (current_step, current_t, current_state) = \
+        advance_state(rhs=rhs, timestepper=timestepper,
+                      checkpoint=checkpoint, get_timestep=get_timestep,
+                      state=current_state, t=current_t, t_final=t_final)
+
     if rank == 0:
         logger.info("Checkpointing final state ...")
-    my_checkpoint(current_step, t=current_t,
-                  dt=(current_t - checkpoint_t),
-                  state=current_state)
-
-    if current_t - t_final < 0:
-        raise ValueError("Simulation exited abnormally")
+    checkpoint(current_step, t=current_t, dt=0, state=current_state)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,13 @@ Time Step Computation
 
 .. autofunction:: get_inviscid_timestep
 .. autofunction:: get_inviscid_cfl
+
+Status Output
+^^^^^^^^^^^^^
+
+.. autofunction:: get_extra_init
+.. autofunction:: get_extra_status
+
 """
 
 __copyright__ = """
@@ -373,3 +380,27 @@ def get_inviscid_timestep(discr, eos, cfl, q):
 #    wavespeeds = _get_wavespeed(w,eos=eos)
 #    max_v = clmath.max(wavespeeds)
 #    return c*dt_ngf*dt_gf/max_v
+
+
+def get_extra_init(cfl, constant_cfl, initname, eosname):
+    """Get Euler-specific init messages."""
+    return (
+        f"CFL:             {cfl}\n"
+        f"Constant CFL:    {constant_cfl}\n"
+        f"Initialization:  {initname}\n"
+        f"EOS:             {eosname}\n")
+
+
+def get_extra_status(discr, eos, step, t, dt, state, cfl=1.0):
+    """Get Euler-specific status messages."""
+    # Why are we displaying pressures and temperatures from rank 0 only? This
+    # seems potentially misleading...
+    cv = split_conserved(discr.dim, state)
+    dv = eos.dependent_vars(cv)
+    from functools import partial
+    _min = partial(discr.nodal_min, "vol")
+    _max = partial(discr.nodal_max, "vol")
+    return (
+        f"------- {cfl=}\n"
+        f"------- P({_min(dv.pressure):.3g}, {_max(dv.pressure):.3g})\n"
+        f"------- T({_min(dv.temperature):.3g}, {_max(dv.temperature):.3g})")

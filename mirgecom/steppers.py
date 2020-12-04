@@ -69,10 +69,10 @@ def advance_state(rhs, timestepper, checkpoint, get_timestep,
         return istep, t, state
 
     while t < t_final:
-
         dt = get_timestep(state=state)
         if dt < 0:
-            return istep, t, state
+            raise ValueError(f"Invalid timestep {dt}")
+        dt = min(dt, t_final - t)
 
         checkpoint(state=state, step=istep, t=t, dt=dt)
 
