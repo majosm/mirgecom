@@ -110,12 +110,7 @@ class AdiabaticSlipBoundary:
 
         The exterior solution is set such that there will be vanishing
         flux through the boundary, preserving mass, momentum (magnitude) and
-        energy.
-        rho_plus = rho_minus
-        v_plus = v_minus - 2 * (v_minus . n_hat) * n_hat
-        mom_plus = rho_plus * v_plus
-        E_plus = E_minus
-        """
+        energy."""
         # Grab some boundary-relevant data
         dim = discr.dim
         cv = split_conserved(dim, q)
