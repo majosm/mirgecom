@@ -228,15 +228,15 @@ def sym_diffusion(dim, sym_alpha, sym_u):
 #
 # Working hypothesis: RHS lives in lower order polynomial space and thus doesn't
 # attain full-order convergence.
-@pytest.mark.parametrize("order", [2, 3])
+@pytest.mark.parametrize("order", [3])
 @pytest.mark.parametrize(("problem", "nsteps", "dt", "scales"),
     [
-        (get_decaying_trig_truncated_domain(1, 2.), 50, 5.e-5, [8, 12, 16]),
-        (get_decaying_trig_truncated_domain(2, 2.), 50, 5.e-5, [8, 12, 16]),
-        (get_decaying_trig_truncated_domain(3, 2.), 50, 5.e-5, [8, 10, 12]),
-        (get_static_trig_var_diff(1), 50, 5.e-5, [8, 12, 16]),
-        (get_static_trig_var_diff(2), 50, 5.e-5, [8, 12, 16]),
-        (get_static_trig_var_diff(3), 50, 5.e-5, [8, 10, 12]),
+#         (get_decaying_trig_truncated_domain(1, 2.), 50, 5.e-5, [8, 12, 16]),
+#         (get_decaying_trig_truncated_domain(2, 2.), 50, 5.e-5, [8, 12, 16]),
+        (get_decaying_trig_truncated_domain(3, 2.), 500, 5.e-5, [12]),
+#         (get_static_trig_var_diff(1), 50, 5.e-5, [8, 12, 16]),
+#         (get_static_trig_var_diff(2), 50, 5.e-5, [8, 12, 16]),
+#         (get_static_trig_var_diff(3), 50, 5.e-5, [8, 10, 12]),
     ])
 def test_diffusion_accuracy(actx_factory, problem, nsteps, dt, scales, order,
             visualize=False):
@@ -244,6 +244,7 @@ def test_diffusion_accuracy(actx_factory, problem, nsteps, dt, scales, order,
     Checks the accuracy of the diffusion operator by solving the heat equation for a
     given problem setup.
     """
+
     actx = actx_factory()
 
     p = problem
@@ -283,11 +284,10 @@ def test_diffusion_accuracy(actx_factory, problem, nsteps, dt, scales, order,
         else:
             quad_tag = QTAG_NONE
 
+        zeros = discr.zeros(actx)
+
         def get_rhs(t, u):
-            result = (diffusion_operator(discr, quad_tag=quad_tag, alpha=alpha,
-                    boundaries=p.get_boundaries(discr, actx, t), u=u)
-                + sym_eval(sym_f, t))
-            return result
+            return zeros
 
         t = 0.
 
@@ -295,9 +295,27 @@ def test_diffusion_accuracy(actx_factory, problem, nsteps, dt, scales, order,
 
         from mirgecom.integrators import rk4_step
 
-        for istep in range(nsteps):
-            u = rk4_step(u, t, dt, get_rhs)
-            t += dt
+        u = rk4_step(u, t, dt, get_rhs)
+
+        import gc
+        gc.collect()
+
+        import tracemalloc
+        tracemalloc.start(1)
+
+        u = rk4_step(u, t, dt, get_rhs)
+        t += dt
+
+#         gc.collect()
+
+        snapshot = tracemalloc.take_snapshot()
+
+        stats = snapshot.statistics("traceback")
+
+        for stat in stats:
+            print(stat)
+            for line in stat.traceback.format():
+                print(line)
 
         expected_u = sym_eval(p.sym_u, t)
 
