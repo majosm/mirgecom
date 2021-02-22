@@ -60,17 +60,17 @@ def check_step(step, interval):
 
 
 def sim_checkpoint(state, step=0, t=0, dt=0, nstatus=-1,
-        get_extra_status=None, nviz=-1, write_vis=None, comm=None, force=False):
+        get_extra_status=None, nviz=-1, write_vis=None, comm=None):
     """Check simulation health, status, viz dumps, and restart."""
     rank = comm.Get_rank() if comm is not None else 0
 
-    if check_step(step, nstatus) or force:
+    if check_step(step, nstatus):
         statusmsg = make_status_message(step=step, t=t, dt=dt,
             extra_status=get_extra_status(step=step, t=t, dt=dt, state=state) if
             get_extra_status else None)
         if rank == 0:
             logger.info(statusmsg)
-    if check_step(step, nviz) or force:
+    if check_step(step, nviz):
         if write_vis is not None:
             write_vis(step, t, state)
 
