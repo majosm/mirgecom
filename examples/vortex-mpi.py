@@ -149,7 +149,7 @@ def main(ctx_factory=cl.create_some_context):
         return write_visualization_file(visualizer, fields=io_fields,
                     basename=casename, step=step, t=t, comm=comm)
 
-    def checkpoint(step, t, dt, state):
+    def checkpoint(step, t, dt, state, force=False):
         exact_state = initializer(nodes, t=t)
         if comm_any(comm, discr.norm(state - exact_state, np.inf) > exittol):
             write_vis(step, t, state)
@@ -157,7 +157,7 @@ def main(ctx_factory=cl.create_some_context):
         get_extra_status = partial(get_extra_status_euler, discr=discr, eos=eos)
         return sim_checkpoint(state=state, step=step, t=t, dt=dt, nstatus=nstatus,
             get_extra_status=get_extra_status, nviz=nviz, write_vis=write_vis,
-            comm=comm)
+            comm=comm, force=force)
 
     (current_step, current_t, current_state) = \
         advance_state(rhs=rhs, timestepper=timestepper,
@@ -166,7 +166,7 @@ def main(ctx_factory=cl.create_some_context):
 
     if rank == 0:
         logger.info("Checkpointing final state ...")
-    checkpoint(current_step, t=current_t, dt=0, state=current_state)
+    checkpoint(current_step, t=current_t, dt=0, state=current_state, force=True)
 
 
 if __name__ == "__main__":
