@@ -90,7 +90,6 @@ def main(ctx_factory=cl.create_some_context):
     nstatus = 10
     nviz = 10
     rank = 0
-    checkpoint_t = current_t
     current_step = 0
     timestepper = rk4_step
     box_ll = -5.0

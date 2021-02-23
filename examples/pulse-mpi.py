@@ -40,6 +40,7 @@ from grudge.shortcuts import make_visualizer
 from mirgecom.euler import (
     inviscid_operator,
     split_conserved,
+    get_inviscid_timestep,
     get_extra_init as get_extra_init_euler,
     get_extra_status as get_extra_status_euler,
 )
@@ -78,8 +79,6 @@ def main(ctx_factory=cl.create_some_context):
     dim = 2
     nel_1d = 16
     order = 1
-    exittol = 2e-2
-    exittol = 100.0
     t_final = 0.1
     current_cfl = 1.0
     vel = np.zeros(shape=(dim,))
@@ -97,7 +96,6 @@ def main(ctx_factory=cl.create_some_context):
     nstatus = 10
     nviz = 10
     rank = 0
-    checkpoint_t = current_t
     current_step = 0
     timestepper = rk4_step
     box_ll = -0.5
