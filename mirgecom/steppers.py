@@ -65,8 +65,6 @@ def advance_state(rhs, timestepper, checkpoint, get_timestep,
         the current time
     state: numpy.ndarray
     """
-    if t_final <= t:
-        return istep, t, state
 
     while t < t_final:
         dt = get_timestep(state=state)
@@ -81,6 +79,6 @@ def advance_state(rhs, timestepper, checkpoint, get_timestep,
         t += dt
         istep += 1
 
-    checkpoint(state=state, step=istep, t=t, dt=0)
+    checkpoint(state=state, step=istep, t=t, dt=0, force=True)
 
     return istep, t, state
