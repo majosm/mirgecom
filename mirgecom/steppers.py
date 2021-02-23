@@ -27,10 +27,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+import sys
+
 
 def advance_state(rhs, timestepper, checkpoint, get_timestep,
-                  state, t_final, t=0.0, istep=0):
-    """Advance state from some time (t) to some time (t_final).
+                  state, t=0.0, t_final=None, istep=0, istep_final=None):
+    """
+    Advance state over time.
 
     Parameters
     ----------
@@ -50,12 +53,14 @@ def advance_state(rhs, timestepper, checkpoint, get_timestep,
     state: numpy.ndarray
         Agglomerated object array containing at least the state variables that
         will be advanced by this stepper
-    t_final: float
-        Simulated time at which to stop
     t: float
-        Time at which to start
+        Time from which to start
+    t_final: float
+        (Optional) Time at which to stop
     istep: int
         Step number from which to start
+    istep_final: int
+        (Optional) Step number at which to stop
 
     Returns
     -------
@@ -66,7 +71,12 @@ def advance_state(rhs, timestepper, checkpoint, get_timestep,
     state: numpy.ndarray
     """
 
-    while t < t_final:
+    if t_final is None:
+        t_final = float("inf")
+    if istep_final is None:
+        istep_final = sys.maxsize
+
+    while t < t_final and istep < istep_final:
         dt = get_timestep(state=state)
         if dt < 0:
             raise ValueError(f"Invalid timestep {dt}")

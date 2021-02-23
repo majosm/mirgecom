@@ -79,7 +79,7 @@ def main(ctx_factory=cl.create_some_context):
     dim = 2
     nel_1d = 16
     order = 1
-    t_final = 0.1
+    istep_final = 10
     current_cfl = 1.0
     vel = np.zeros(shape=(dim,))
     orig = np.zeros(shape=(dim,))
@@ -138,8 +138,9 @@ def main(ctx_factory=cl.create_some_context):
     init_message = make_init_message(dim=dim, order=order, casename=casename,
                                      nelements=local_nelements,
                                      global_nelements=global_nelements,
-                                     dt=current_dt, t_final=t_final, nstatus=nstatus,
-                                     nviz=nviz, extra_init=extra_init)
+                                     dt=current_dt, istep_final=istep_final,
+                                     nstatus=nstatus, nviz=nviz,
+                                     extra_init=extra_init)
     if rank == 0:
         logger.info(init_message)
 
@@ -169,7 +170,7 @@ def main(ctx_factory=cl.create_some_context):
     (current_step, current_t, current_state) = \
         advance_state(rhs=rhs, timestepper=timestepper,
                       checkpoint=checkpoint, get_timestep=get_timestep,
-                      state=current_state, t=current_t, t_final=t_final)
+                      state=current_state, t=current_t, istep_final=istep_final)
 
     if rank == 0:
         logger.info("Timestepping completed.")

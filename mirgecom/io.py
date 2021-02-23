@@ -34,16 +34,25 @@ THE SOFTWARE.
 from meshmode.mesh import BTAG_ALL, BTAG_NONE  # noqa
 
 
-def make_init_message(*, dim, order, dt, t_final, nstatus, nviz, casename,
-        extra_init=None, nelements=0, global_nelements=0):
+def make_init_message(*, dim, order, dt, nstatus, nviz, casename, t=0,
+        t_final=None, istep=0, istep_final=None, nelements=0, global_nelements=0,
+        extra_init=None):
     """Create a summary of some general simulation parameters and inputs."""
     initmsg = (
-        f"Initialization for Case({casename})\n"
-        f"===\n"
-        f"Num {dim}d order-{order} elements: {nelements}\n"
-        f"Num global elements: {global_nelements}\n"
-        f"Timestep:        {dt}\n"
-        f"Final time:      {t_final}\n")
+            f"Initialization for Case({casename})\n"  # noqa: E126
+            f"===\n"  # noqa: E126
+            f"Num {dim}d order-{order} elements: {nelements}\n"  # noqa: E126
+            f"Num global elements: {global_nelements}\n"  # noqa: E126
+            f"Timestep:        {dt}\n"  # noqa: E126
+            f"Initial time:    {t}\n")  # noqa: E126
+    if t_final is not None:
+        initmsg += (
+            f"Final time:      {t_final}\n")
+    initmsg += (
+            f"Initial step: {istep}\n")  # noqa: E126
+    if istep_final is not None:
+        initmsg += (
+            f"Final step: {istep_final}\n")
     if extra_init is not None:
         initmsg += extra_init
     return initmsg
