@@ -25,6 +25,7 @@ THE SOFTWARE.
 """
 
 import logging
+import math
 from mirgecom.mpi import mpi_entry_point
 import numpy as np
 from functools import partial
@@ -80,7 +81,7 @@ def main(ctx_factory=cl.create_some_context):
     dim = 2
     nel_1d = 16
     order = 1
-    t_final = 0.1
+    t_final = 2.
     current_cfl = 1.0
     vel = np.zeros(shape=(dim,))
     orig = np.zeros(shape=(dim,))
@@ -94,7 +95,7 @@ def main(ctx_factory=cl.create_some_context):
     wall = AdiabaticSlipBoundary()
     boundaries = {BTAG_ALL: wall}
     constant_cfl = False
-    nviz = 10
+    vis_dt = 0.1
     rank = 0
     current_step = 0
     timestepper = rk4_step
@@ -140,10 +141,11 @@ def main(ctx_factory=cl.create_some_context):
         try:
             dt_max = get_inviscid_timestep(discr=discr, q=state, cfl=current_cfl,
                 eos=eos) if constant_cfl else current_dt
+            dt_max *= math.exp(-t)
         except InviscidTimestepError:
             write_vis(step, t, state)
             raise
-        return get_sim_timestep(dt_max, t, t_final=t_final)
+        return get_sim_timestep(dt_max, t, t_final=t_final, key_every=[vis_dt])
 
     def rhs(t, state):
         return inviscid_operator(discr, q=state, t=t,
@@ -155,7 +157,7 @@ def main(ctx_factory=cl.create_some_context):
                     basename=casename, step=step, t=t, comm=comm)
 
     def checkpoint(step, t, dt, state):
-        return sim_checkpoint(step, t, dt, state, t_final=t_final, nvis=nviz,
+        return sim_checkpoint(step, t, dt, state, t_final=t_final, vis_dt=vis_dt,
             write_vis=write_vis)
 
     if current_step == 0:
