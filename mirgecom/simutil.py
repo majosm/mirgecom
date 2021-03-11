@@ -4,6 +4,7 @@
 .. autofunction:: check_time
 .. autofunction:: create_parallel_grid
 .. autofunction:: get_sim_timestep
+.. autofunction:: make_timestepper
 .. autofunction:: sim_checkpoint
 """
 
@@ -32,10 +33,39 @@ THE SOFTWARE.
 """
 
 import logging
+from dataclasses import dataclass
+from typing import Union
+
+import numpy as np
 
 from mirgecom.utils import get_containing_interval
 
+from meshmode.dof_array import DOFArray
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class State:
+    """State for a given timestep.
+
+    .. attribute:: step
+
+        The current step number.
+
+    .. attribute:: time
+
+        The current time.
+
+    .. attribute:: fields
+
+        The state fields being evolved in time.
+
+    """
+
+    step: int
+    time: float
+    fields: Union[DOFArray, np.ndarray]
 
 
 def check_step(step, interval):
@@ -112,7 +142,7 @@ def create_parallel_grid(comm, generate_grid):
     return local_mesh, global_nelements
 
 
-def get_sim_timestep(dt_max, t, t_final=None, key_every=None):
+def get_sim_timestep(state, dt_max, t_final=None, key_every=None):
     """Compute the timestep given a maximum value and various constraints."""
     if key_every is None:
         key_every = []
@@ -123,33 +153,61 @@ def get_sim_timestep(dt_max, t, t_final=None, key_every=None):
     dt = dt_max
 
     for key_dt in key_every:
-        _, _, t_next_key = get_containing_interval(0, key_dt, t)
-        dt = min(dt, t_next_key - t)
+        _, _, t_next_key = get_containing_interval(0, key_dt, state.time)
+        dt = min(dt, t_next_key - state.time)
 
     return dt
 
 
-def sim_checkpoint(step, t, dt, state, nsteps=None, t_final=None, nvis=None,
-        vis_dt=None, write_vis=None, nrestart=None, write_restart=None):
+def make_timestepper(get_timestep, field_stepper):
+    """
+    Create a function that advances the simulation from one step to the next.
+
+    Parameters
+    ----------
+    get_timestep
+        Function that returns the next timestep size given the current state.
+    field_stepper
+        Function that returns the next step's field values given the current field
+        values, the current time, and the timestep size.
+
+    Returns
+    -------
+    timestepper
+        A function that takes the current step's state and returns the next step's
+        state.
+    """
+    def timestepper(state):
+        dt = get_timestep(state)
+        return State(
+            step=state.step + 1,
+            time=state.time + dt,
+            fields=field_stepper(state.fields, state.time, dt))
+
+    return timestepper
+
+
+def sim_checkpoint(state, nsteps=None, t_final=None, nvis=None, vis_dt=None,
+        write_vis=None, nrestart=None, write_restart=None):
     """Handle logic for basic checkpointing functionality."""
     done = False
     if nsteps is not None:
-        done = step == nsteps
+        done = state.step == nsteps
     if t_final is not None:
-        done = done or t >= t_final
+        done = done or state.time >= t_final
 
     do_vis = done
     if nvis is not None:
-        do_vis = do_vis or check_step(step, nvis)
+        do_vis = do_vis or check_step(state.step, nvis)
     if vis_dt is not None:
-        do_vis = do_vis or check_time(t, vis_dt)
+        do_vis = do_vis or check_time(state.time, vis_dt)
     if do_vis and write_vis is not None:
-        write_vis(step, t, state)
+        write_vis(state)
 
     do_restart = done
     if nrestart is not None:
-        do_restart = do_vis or check_step(step, nrestart)
+        do_restart = do_vis or check_step(state.step, nrestart)
     if do_restart and write_restart is not None:
-        write_restart(step, t, dt, state)
+        write_restart(state)
 
     return done

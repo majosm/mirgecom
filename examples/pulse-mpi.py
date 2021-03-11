@@ -45,7 +45,9 @@ from mirgecom.euler import (
 )
 from mirgecom.simutil import (
     create_parallel_grid,
+    State,
     get_sim_timestep,
+    make_timestepper,
     sim_checkpoint,
 )
 from mirgecom.io import (
@@ -96,7 +98,7 @@ def main(ctx_factory=cl.create_some_context):
     nviz = 10
     rank = 0
     current_step = 0
-    timestepper = rk4_step
+    integrator = rk4_step
     box_ll = -0.5
     box_ur = 0.5
 
@@ -122,10 +124,10 @@ def main(ctx_factory=cl.create_some_context):
         actx, local_mesh, order=order, mpi_communicator=comm
     )
     nodes = thaw(actx, discr.nodes())
-    uniform_state = initializer(nodes)
+    uniform_q = initializer(nodes)
     acoustic_pulse = AcousticPulse(dim=dim, amplitude=1.0, width=.1,
                                    center=orig)
-    current_state = acoustic_pulse(x_vec=nodes, q=uniform_state, eos=eos)
+    current_q = acoustic_pulse(x_vec=nodes, q=uniform_q, eos=eos)
 
     init_message = make_init_message(dim=dim, order=order, casename=casename,
                                      nelements=local_nelements,
@@ -135,39 +137,39 @@ def main(ctx_factory=cl.create_some_context):
 
     visualizer = make_visualizer(discr, order + 3 if dim == 2 else order)
 
-    def write_vis(step, t, state):
-        io_fields = get_inviscid_vis_fields(dim, state, eos)
+    def write_vis(state):
+        io_fields = get_inviscid_vis_fields(dim, state.fields, eos)
         return write_visualization_file(visualizer, fields=io_fields,
-                    basename=casename, step=step, t=t, comm=comm)
+                    basename=casename, step=state.step, t=state.time, comm=comm)
 
-    def get_timestep(step, t, state):
+    def get_timestep(state):
         try:
-            dt_max = get_inviscid_timestep(discr=discr, q=state, cfl=current_cfl,
-                eos=eos) if constant_cfl else current_dt
+            dt_max = get_inviscid_timestep(discr=discr, q=state.fields,
+                cfl=current_cfl, eos=eos) if constant_cfl else current_dt
         except InviscidTimestepError:
-            write_vis(step, t, state)
+            write_vis(state)
             raise
-        return get_sim_timestep(dt_max, t, t_final=t_final)
+        return get_sim_timestep(state, dt_max, t_final=t_final)
 
-    def rhs(t, state):
-        return inviscid_operator(discr, q=state, t=t,
-                                 boundaries=boundaries, eos=eos)
+    def rhs(t, q):
+        return inviscid_operator(discr, q=q, t=t, boundaries=boundaries, eos=eos)
 
-    def checkpoint(step, t, dt, state):
-        return sim_checkpoint(step, t, dt, state, t_final=t_final, nvis=nviz,
-            write_vis=write_vis)
+    timestepper = make_timestepper(get_timestep, partial(integrator, rhs=rhs))
+
+    def checkpoint(state):
+        return sim_checkpoint(state, t_final=t_final, nvis=nviz, write_vis=write_vis)
+
+    current_state = State(step=current_step, time=current_t, fields=current_q)
 
     if current_step == 0:
-        dt = get_timestep(0, current_t, current_state)
-        done = checkpoint(0, current_t, dt, current_state)
+        done = checkpoint(current_state)
         assert not done
 
     if rank == 0:
         logger.info("Timestepping started.")
 
-    (current_step, current_t, current_state) = \
-        advance_state(rhs=rhs, timestepper=timestepper, checkpoint=checkpoint,
-            get_timestep=get_timestep, state=current_state, t=current_t)
+    current_state = advance_state(
+        timestepper=timestepper, checkpoint=checkpoint, state=current_state)
 
     if rank == 0:
         logger.info("Timestepping finished.")
