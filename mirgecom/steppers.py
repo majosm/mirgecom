@@ -51,12 +51,7 @@ def advance_state(timestepper, checkpoint, state, logmgr=None):
     state
         The final state.
     """
-    if state.step == 0:
-        done = checkpoint(state)
-        if done:
-            raise ValueError("Checkpoint returned 'True' before stepping.")
-
-    done = False
+    done = checkpoint(state, weak=(state.step > 0))
 
     while not done:
 

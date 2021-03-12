@@ -156,8 +156,9 @@ def main(ctx_factory=cl.create_some_context):
 
     timestepper = make_timestepper(get_timestep, partial(integrator, rhs=rhs))
 
-    def checkpoint(state):
-        return sim_checkpoint(state, t_final=t_final, nvis=nviz, write_vis=write_vis)
+    def checkpoint(state, **kwargs):
+        return sim_checkpoint(
+            state, t_final=t_final, nvis=nviz, write_vis=write_vis, **kwargs)
 
     current_state = State(step=current_step, time=current_t, fields=current_q)
 

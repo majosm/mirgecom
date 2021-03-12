@@ -187,8 +187,8 @@ def make_timestepper(get_timestep, field_stepper):
     return timestepper
 
 
-def sim_checkpoint(state, nsteps=None, t_final=None, nvis=None, vis_dt=None,
-        write_vis=None, nrestart=None, write_restart=None):
+def sim_checkpoint(state, weak=False, nsteps=None, t_final=None, nvis=None,
+        vis_dt=None, write_vis=None, nrestart=None, write_restart=None):
     """Handle logic for basic checkpointing functionality."""
     done = False
     if nsteps is not None:
@@ -196,18 +196,19 @@ def sim_checkpoint(state, nsteps=None, t_final=None, nvis=None, vis_dt=None,
     if t_final is not None:
         done = done or state.time >= t_final
 
-    do_vis = done
-    if nvis is not None:
-        do_vis = do_vis or check_step(state.step, nvis)
-    if vis_dt is not None:
-        do_vis = do_vis or check_time(state.time, vis_dt)
-    if do_vis and write_vis is not None:
-        write_vis(state)
+    if not weak:
+        do_vis = done
+        if nvis is not None:
+            do_vis = do_vis or check_step(state.step, nvis)
+        if vis_dt is not None:
+            do_vis = do_vis or check_time(state.time, vis_dt)
+        if do_vis and write_vis is not None:
+            write_vis(state)
 
-    do_restart = done
-    if nrestart is not None:
-        do_restart = do_vis or check_step(state.step, nrestart)
-    if do_restart and write_restart is not None:
-        write_restart(state)
+        do_restart = done
+        if nrestart is not None:
+            do_restart = do_vis or check_step(state.step, nrestart)
+        if do_restart and write_restart is not None:
+            write_restart(state)
 
     return done

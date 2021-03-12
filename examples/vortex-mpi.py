@@ -188,12 +188,15 @@ def main(ctx_factory=cl.create_some_context, use_profiling=False, use_logmgr=Fal
 
     timestepper = make_timestepper(get_timestep, partial(integrator, rhs=rhs))
 
-    def checkpoint(state):
-        exact_q = initializer(nodes, t=state.time)
-        if comm_any(comm, discr.norm(state.fields - exact_q, np.inf) > exittol):
-            write_vis(state)
-            raise RuntimeError(f"Exact solution mismatch at step {state.step}.")
-        return sim_checkpoint(state, t_final=t_final, nvis=nviz, write_vis=write_vis)
+    def checkpoint(state, weak=False, **kwargs):
+        if not weak:
+            exact_q = initializer(nodes, t=state.time)
+            if comm_any(comm, discr.norm(state.fields - exact_q, np.inf) > exittol):
+                write_vis(state)
+                raise RuntimeError(f"Exact solution mismatch at step {state.step}.")
+        return sim_checkpoint(
+            state, weak=weak, t_final=t_final, nvis=nviz, write_vis=write_vis,
+            **kwargs)
 
     current_state = State(step=current_step, time=current_t, fields=current_q)
 
