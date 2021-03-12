@@ -197,10 +197,6 @@ def main(ctx_factory=cl.create_some_context, use_profiling=False, use_logmgr=Fal
 
     current_state = State(step=current_step, time=current_t, fields=current_q)
 
-    if current_step == 0:
-        done = checkpoint(current_state)
-        assert not done
-
     if rank == 0:
         logger.info("Timestepping started.")
 
