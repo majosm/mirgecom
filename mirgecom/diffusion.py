@@ -208,7 +208,7 @@ class NeumannDiffusionBoundary(DiffusionBoundary):
         return discr.project(dd_quad, dd_allfaces_quad, flux_quad)
 
 
-def diffusion_operator(discr, quad_tag, alpha, boundaries, u):
+def diffusion_operator(discr, quad_tag, alpha, boundaries, u, return_q=False):
     r"""
     Compute the diffusion operator.
 
@@ -287,21 +287,24 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u):
 
     q_quad = discr.project("vol", dd_quad, q)
 
-    return (
-        discr.inverse_mass(
-            discr.weak_div(dd_quad, -sqrt_alpha_quad*q_quad)
-            -  # noqa: W504
-            discr.face_mass(
-                dd_allfaces_quad,
-                _u_flux(discr, quad_tag, alpha, interior_trace_pair(discr, q))
-                + sum(
-                    bdry.get_u_flux(discr, quad_tag, alpha, as_dofdesc(btag),
-                        q)
-                    for btag, bdry in boundaries.items()
-                )
-                + sum(
-                    _u_flux(discr, quad_tag, alpha, tpair)
-                    for tpair in cross_rank_trace_pairs(discr, q))
-                )
+    result = discr.inverse_mass(
+        discr.weak_div(dd_quad, -sqrt_alpha_quad*q_quad)
+        -  # noqa: W504
+        discr.face_mass(
+            dd_allfaces_quad,
+            _u_flux(discr, quad_tag, alpha, interior_trace_pair(discr, q))
+            + sum(
+                bdry.get_u_flux(discr, quad_tag, alpha, as_dofdesc(btag),
+                    q)
+                for btag, bdry in boundaries.items()
             )
-        )
+            + sum(
+                _u_flux(discr, quad_tag, alpha, tpair)
+                for tpair in cross_rank_trace_pairs(discr, q)
+            )
+        ))
+
+    if return_q:
+        return result, q
+    else:
+        return result
