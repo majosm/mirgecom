@@ -62,14 +62,15 @@ def get_mesh(nel):
     rtag_to_index = make_tag_to_index(region_tags)
 
     grp_regions = np.empty(nel, dtype=np.int32)
-    grp_regions[:round(nel/2)+1] = get_tag_bit(rtag_to_index, "Lower")
-    grp_regions[round(nel/2)+1:] = get_tag_bit(rtag_to_index, "Upper")
+    grp_regions[:math.floor(nel/2)+nel%2] = get_tag_bit(rtag_to_index, "Lower")
+    grp_regions[math.floor(nel/2)+nel%2:] = get_tag_bit(rtag_to_index, "Upper")
 
     return regionless_mesh.copy(
         groups=[regionless_mesh.groups[0].copy(
             regions=grp_regions)],
         region_tags=region_tags)
 
+q = None
 
 @mpi_entry_point
 def main():
@@ -85,7 +86,7 @@ def main():
     from meshmode.distributed import MPIMeshDistributor, get_partition_by_pymetis
     mesh_dist = MPIMeshDistributor(comm)
 
-    nel = 16
+    nel = 8
 
     if mesh_dist.is_mananger_rank():
         mesh = get_mesh(nel)
@@ -101,9 +102,9 @@ def main():
     else:
         local_mesh = mesh_dist.receive_mesh_part()
 
-    order = 3
+    order = 2
 
-    dt = 1e-4
+    dt = 1e-3
 
     discr = EagerDGDiscretization(actx, local_mesh, order=order,
                     mpi_communicator=comm)
@@ -128,20 +129,27 @@ def main():
     for igrp, grp in enumerate(local_mesh.groups):
         lower_elems, = np.where((grp.regions & lower_region_bit) != 0)
         upper_elems, = np.where((grp.regions & upper_region_bit) != 0)
-        alpha_np[igrp][lower_elems, :] = 0.25
+        alpha_np[igrp][lower_elems, :] = 0.5
         alpha_np[igrp][upper_elems, :] = 2
 
     alpha = DOFArray(actx, tuple([
         actx.from_numpy(alpha_np_i) for alpha_np_i in alpha_np]))
 
+    from pytools.obj_array import make_obj_array
+    global q
+    q = make_obj_array([discr.zeros(actx)])
+
     def rhs(t, u):
-        return (diffusion_operator(
-            discr, quad_tag=QTAG_NONE, alpha=alpha, boundaries=boundaries, u=u))
+        global q
+        result, q = diffusion_operator(
+            discr, quad_tag=QTAG_NONE, alpha=alpha, boundaries=boundaries, u=u,
+            return_q=True)
+        return result
 
     rank = comm.Get_rank()
 
     t = 0
-    t_final = 1
+    t_final = 10
     istep = 0
 
     while True:
@@ -150,6 +158,7 @@ def main():
             vis.write_vtk_file("fld-two-region-1d-%03d-%04d.vtu" % (rank, istep),
                     [
                         ("u", u),
+                        ("q", q),
                         ("alpha", alpha),
                         ])
 
