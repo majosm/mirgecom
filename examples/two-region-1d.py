@@ -86,7 +86,7 @@ def main():
     from meshmode.distributed import MPIMeshDistributor, get_partition_by_pymetis
     mesh_dist = MPIMeshDistributor(comm)
 
-    nel = 8
+    nel = 32
 
     if mesh_dist.is_mananger_rank():
         mesh = get_mesh(nel)
@@ -104,7 +104,7 @@ def main():
 
     order = 2
 
-    dt = 1e-3
+    dt = 1e-4
 
     discr = EagerDGDiscretization(actx, local_mesh, order=order,
                     mpi_communicator=comm)
@@ -123,17 +123,44 @@ def main():
     lower_region_bit = local_mesh.region_tag_bit("Lower")
     upper_region_bit = local_mesh.region_tag_bit("Upper")
 
-    alpha = discr.empty(actx)
-    alpha_np = [actx.to_numpy(alpha_i) for alpha_i in alpha]
+    lower_mask_np = np.empty((nel, order+1), dtype=int)
+    lower_mask_np[:, :] = 0
+    lower_elems, = np.where((local_mesh.groups[0].regions & lower_region_bit) != 0)
+    lower_mask_np[lower_elems, :] = 1
+    lower_mask = DOFArray(actx, (actx.from_numpy(lower_mask_np),))
 
-    for igrp, grp in enumerate(local_mesh.groups):
-        lower_elems, = np.where((grp.regions & lower_region_bit) != 0)
-        upper_elems, = np.where((grp.regions & upper_region_bit) != 0)
-        alpha_np[igrp][lower_elems, :] = 0.5
-        alpha_np[igrp][upper_elems, :] = 2
+    upper_mask_np = np.empty((nel, order+1), dtype=int)
+    upper_mask_np[:, :] = 0
+    upper_elems, = np.where((local_mesh.groups[0].regions & upper_region_bit) != 0)
+    upper_mask_np[upper_elems, :] = 1
+    upper_mask = DOFArray(actx, (actx.from_numpy(upper_mask_np),))
 
-    alpha = DOFArray(actx, tuple([
-        actx.from_numpy(alpha_np_i) for alpha_np_i in alpha_np]))
+    alpha_lower = 0.5
+    alpha_upper = 1
+
+    smoothness = 0
+
+    alpha_np = np.empty((nel, order+1), dtype=float)
+    alpha_np[lower_elems, :] = alpha_lower
+    alpha_np[int(nel/2)-1, order] = ((1-smoothness/2)*alpha_lower
+        + smoothness/2*alpha_upper)
+    alpha_np[upper_elems, :] = alpha_upper
+    alpha_np[int(nel/2), 0] = ((1-smoothness/2)*alpha_upper
+        + smoothness/2*alpha_lower)
+
+    alpha = DOFArray(actx, (actx.from_numpy(alpha_np),))
+
+    ones = discr.zeros(actx) + 1
+
+    f = alpha_lower*alpha_upper/(alpha_lower + alpha_upper)
+
+    u_exact = (
+          lower_mask * f/alpha_lower * (nodes[0] + 1)
+        + upper_mask * (1 + f/alpha_upper * (nodes[0] - 1)))
+    q_exact = (
+          lower_mask * f/math.sqrt(alpha_lower)
+        + upper_mask * f/math.sqrt(alpha_upper))
+    flux_exact = f * ones
 
     from pytools.obj_array import make_obj_array
     global q
@@ -149,7 +176,7 @@ def main():
     rank = comm.Get_rank()
 
     t = 0
-    t_final = 10
+    t_final = 5
     istep = 0
 
     while True:
@@ -158,7 +185,11 @@ def main():
             vis.write_vtk_file("fld-two-region-1d-%03d-%04d.vtu" % (rank, istep),
                     [
                         ("u", u),
-                        ("q", q),
+                        ("u_exact", u_exact),
+                        ("q", q[0]),
+                        ("q_exact", q_exact),
+                        ("flux", q[0]*actx.np.sqrt(alpha)),
+                        ("flux_exact", flux_exact),
                         ("alpha", alpha),
                         ])
 
