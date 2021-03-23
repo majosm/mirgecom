@@ -65,14 +65,14 @@ def _q_flux(discr, quad_tag, alpha_tpair, u_tpair):
 
     normal_quad = thaw(actx, discr.normal(dd_quad))
 
-    alpha_quad = discr.project("vol", dd_quad, alpha_tpair.int)
-    sqrt_alpha_quad = _sqrt(actx, alpha_quad)
+    def to_quad(a):
+        return discr.project(dd, dd_quad, a)
 
-    u_avg_quad = discr.project(dd, dd_quad, u_tpair.avg)
+    def flux(sqrt_alpha, u, normal):
+        return -sqrt_alpha * u * normal
 
-    return discr.project(dd_quad, dd_allfaces_quad,
-        -sqrt_alpha_quad * u_avg_quad * normal_quad)
-
+    return discr.project(dd_quad, dd_allfaces_quad, flux(
+        _sqrt(actx, to_quad(alpha_tpair.int)), to_quad(u_tpair.avg), normal_quad))
 
 
 def _u_flux(discr, quad_tag, alpha_tpair, q_tpair):
@@ -84,13 +84,14 @@ def _u_flux(discr, quad_tag, alpha_tpair, q_tpair):
 
     normal_quad = thaw(actx, discr.normal(dd_quad))
 
-    alpha_quad = discr.project("vol", dd_quad, alpha_tpair.int)
-    sqrt_alpha_quad = _sqrt(actx, alpha_quad)
+    def to_quad(a):
+        return discr.project(dd, dd_quad, a)
 
-    q_avg_quad = discr.project(dd, dd_quad, q_tpair.avg)
+    def flux(sqrt_alpha, q, normal):
+        return -sqrt_alpha * np.dot(q, normal)
 
-    return discr.project(dd_quad, dd_allfaces_quad,
-        -sqrt_alpha_quad * np.dot(q_avg_quad, normal_quad))
+    return discr.project(dd_quad, dd_allfaces_quad, flux(
+        _sqrt(actx, to_quad(alpha_tpair.int)), to_quad(q_tpair.avg), normal_quad))
 
 
 class DiffusionBoundary(metaclass=abc.ABCMeta):
