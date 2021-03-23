@@ -56,7 +56,7 @@ def _grad(discr, x):
         return 0.
 
 
-def _q_flux(discr, quad_tag, alpha, u_tpair):
+def _q_flux(discr, quad_tag, alpha_tpair, u_tpair):
     actx = u_tpair.int.array_context
 
     dd = u_tpair.dd
@@ -65,7 +65,7 @@ def _q_flux(discr, quad_tag, alpha, u_tpair):
 
     normal_quad = thaw(actx, discr.normal(dd_quad))
 
-    alpha_quad = discr.project("vol", dd_quad, alpha)
+    alpha_quad = discr.project("vol", dd_quad, alpha_tpair.int)
     sqrt_alpha_quad = _sqrt(actx, alpha_quad)
 
     u_avg_quad = discr.project(dd, dd_quad, u_tpair.avg)
@@ -74,7 +74,8 @@ def _q_flux(discr, quad_tag, alpha, u_tpair):
         -sqrt_alpha_quad * u_avg_quad * normal_quad)
 
 
-def _u_flux(discr, quad_tag, alpha, q_tpair):
+
+def _u_flux(discr, quad_tag, alpha_tpair, q_tpair):
     actx = q_tpair.int[0].array_context
 
     dd = q_tpair.dd
@@ -83,7 +84,7 @@ def _u_flux(discr, quad_tag, alpha, q_tpair):
 
     normal_quad = thaw(actx, discr.normal(dd_quad))
 
-    alpha_quad = discr.project("vol", dd_quad, alpha)
+    alpha_quad = discr.project("vol", dd_quad, alpha_tpair.int)
     sqrt_alpha_quad = _sqrt(actx, alpha_quad)
 
     q_avg_quad = discr.project(dd, dd_quad, q_tpair.avg)
@@ -140,15 +141,19 @@ class DirichletDiffusionBoundary(DiffusionBoundary):
         self.value = value
 
     # Observe: Dirichlet BC enforced on q, not u
-    def get_q_flux(self, discr, quad_tag, alpha, dd, u):  # noqa: D102
+    def get_q_flux(self, discr, quad_tag, dd, alpha, u):  # noqa: D102
+        alpha_int = discr.project("vol", dd, alpha)
+        alpha_tpair = TracePair(dd, interior=alpha_int, exterior=alpha_int)
         u_int = discr.project("vol", dd, u)
-        u_tpair = TracePair(dd, interior=u_int, exterior=2.*self.value-u_int)
-        return _q_flux(discr, quad_tag, alpha, u_tpair)
+        u_tpair = TracePair(dd, interior=u_int, exterior=2*self.value-u_int)
+        return _q_flux(discr, quad_tag, alpha_tpair, u_tpair)
 
-    def get_u_flux(self, discr, quad_tag, alpha, dd, q):  # noqa: D102
+    def get_u_flux(self, discr, quad_tag, dd, alpha, q):  # noqa: D102
+        alpha_int = discr.project("vol", dd, alpha)
+        alpha_tpair = TracePair(dd, interior=alpha_int, exterior=alpha_int)
         q_int = discr.project("vol", dd, q)
         q_tpair = TracePair(dd, interior=q_int, exterior=q_int)
-        return _u_flux(discr, quad_tag, alpha, q_tpair)
+        return _u_flux(discr, quad_tag, alpha_tpair, q_tpair)
 
 
 class NeumannDiffusionBoundary(DiffusionBoundary):
@@ -188,12 +193,14 @@ class NeumannDiffusionBoundary(DiffusionBoundary):
         """
         self.value = value
 
-    def get_q_flux(self, discr, quad_tag, alpha, dd, u):  # noqa: D102
+    def get_q_flux(self, discr, quad_tag, dd, alpha, u):  # noqa: D102
+        alpha_int = discr.project("vol", dd, alpha)
+        alpha_tpair = TracePair(dd, interior=alpha_int, exterior=alpha_int)
         u_int = discr.project("vol", dd, u)
         u_tpair = TracePair(dd, interior=u_int, exterior=u_int)
-        return _q_flux(discr, quad_tag, alpha, u_tpair)
+        return _q_flux(discr, quad_tag, alpha_tpair, u_tpair)
 
-    def get_u_flux(self, discr, quad_tag, alpha, dd, q):  # noqa: D102
+    def get_u_flux(self, discr, quad_tag, dd, alpha, q):  # noqa: D102
         dd_quad = dd.with_qtag(quad_tag)
         dd_allfaces_quad = dd_quad.with_dtag("all_faces")
         # Compute the flux directly instead of constructing an external q value
@@ -273,17 +280,18 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, return_q=False):
         -  # noqa: W504
         discr.face_mass(
             dd_allfaces_quad,
-            _q_flux(discr, quad_tag, alpha, interior_trace_pair(discr, u))
+            _q_flux(discr, quad_tag, interior_trace_pair(discr, alpha),
+                interior_trace_pair(discr, u))
             + sum(
-                bdry.get_q_flux(discr, quad_tag, alpha, as_dofdesc(btag),
-                    u)
-                for btag, bdry in boundaries.items()
-            )
+                bdry.get_q_flux(discr, quad_tag, as_dofdesc(btag), alpha, u)
+                for btag, bdry in boundaries.items())
             + sum(
-                _q_flux(discr, quad_tag, alpha, tpair)
-                for tpair in cross_rank_trace_pairs(discr, u)
+                _q_flux(discr, quad_tag, alpha_tpair, u_tpair)
+                for alpha_tpair, u_tpair in zip(
+                    cross_rank_trace_pairs(discr, alpha),
+                    cross_rank_trace_pairs(discr, u)))
             )
-        ))
+        )
 
     q_quad = discr.project("vol", dd_quad, q)
 
@@ -292,17 +300,18 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, return_q=False):
         -  # noqa: W504
         discr.face_mass(
             dd_allfaces_quad,
-            _u_flux(discr, quad_tag, alpha, interior_trace_pair(discr, q))
+            _u_flux(discr, quad_tag, interior_trace_pair(discr, alpha),
+                interior_trace_pair(discr, q))
             + sum(
-                bdry.get_u_flux(discr, quad_tag, alpha, as_dofdesc(btag),
-                    q)
-                for btag, bdry in boundaries.items()
-            )
+                bdry.get_u_flux(discr, quad_tag, as_dofdesc(btag), alpha, q)
+                for btag, bdry in boundaries.items())
             + sum(
-                _u_flux(discr, quad_tag, alpha, tpair)
-                for tpair in cross_rank_trace_pairs(discr, q)
+                _u_flux(discr, quad_tag, alpha_tpair, q_tpair)
+                for alpha_tpair, q_tpair in zip(
+                    cross_rank_trace_pairs(discr, alpha),
+                    cross_rank_trace_pairs(discr, q)))
             )
-        ))
+        )
 
     if return_q:
         return result, q
