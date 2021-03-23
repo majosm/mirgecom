@@ -42,13 +42,6 @@ from grudge.eager import interior_trace_pair, cross_rank_trace_pairs
 from grudge.symbolic.primitives import TracePair, as_dofdesc
 
 
-def _sqrt(actx, x):
-    if isinstance(x, DOFArray):
-        return actx.np.sqrt(x)
-    else:
-        return math.sqrt(x)
-
-
 def _grad(discr, x):
     if isinstance(x, DOFArray):
         return discr.grad(x)
@@ -68,14 +61,14 @@ def _v_flux(discr, quad_tag, alpha_tpair, u_tpair):
     def to_quad(a):
         return discr.project(dd, dd_quad, a)
 
-    def flux(sqrt_alpha, u, normal):
-        return -sqrt_alpha * u * normal
+    def flux(alpha, u, normal):
+        return -alpha * u * normal
 
     return discr.project(dd_quad, dd_allfaces_quad, flux(
-        _sqrt(actx, to_quad(alpha_tpair.int)), to_quad(u_tpair.avg), normal_quad))
+        to_quad(alpha_tpair.int), to_quad(u_tpair.avg), normal_quad))
 
 
-def _u_flux(discr, quad_tag, alpha_tpair, v_tpair):
+def _u_flux(discr, quad_tag, v_tpair):
     actx = v_tpair.int[0].array_context
 
     dd = v_tpair.dd
@@ -87,11 +80,11 @@ def _u_flux(discr, quad_tag, alpha_tpair, v_tpair):
     def to_quad(a):
         return discr.project(dd, dd_quad, a)
 
-    def flux(sqrt_alpha, v, normal):
-        return -sqrt_alpha * np.dot(v, normal)
+    def flux(v, normal):
+        return -np.dot(v, normal)
 
     return discr.project(dd_quad, dd_allfaces_quad, flux(
-        _sqrt(actx, to_quad(alpha_tpair.int)), to_quad(v_tpair.avg), normal_quad))
+        to_quad(v_tpair.avg), normal_quad))
 
 
 class DiffusionBoundary(metaclass=abc.ABCMeta):
@@ -108,7 +101,7 @@ class DiffusionBoundary(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def get_u_flux(self, discr, quad_tag, alpha, dd, v):
+    def get_u_flux(self, discr, quad_tag, dd, v):
         """Compute the flux for *u* on the boundary corresponding to *dd*."""
         raise NotImplementedError
 
@@ -150,11 +143,9 @@ class DirichletDiffusionBoundary(DiffusionBoundary):
         return _v_flux(discr, quad_tag, alpha_tpair, u_tpair)
 
     def get_u_flux(self, discr, quad_tag, dd, alpha, v):  # noqa: D102
-        alpha_int = discr.project("vol", dd, alpha)
-        alpha_tpair = TracePair(dd, interior=alpha_int, exterior=alpha_int)
         v_int = discr.project("vol", dd, v)
         v_tpair = TracePair(dd, interior=v_int, exterior=v_int)
-        return _u_flux(discr, quad_tag, alpha_tpair, v_tpair)
+        return _u_flux(discr, quad_tag, v_tpair)
 
 
 class NeumannDiffusionBoundary(DiffusionBoundary):
@@ -168,8 +159,8 @@ class NeumannDiffusionBoundary(DiffusionBoundary):
 
         u^+ = u^-
 
-    to compute boundary fluxes for $\mathbf{v} = \sqrt{\alpha}\nabla u$, and computes
-    boundary fluxes for $u_t = \nabla \cdot (\sqrt{\alpha} \mathbf{v})$ using
+    to compute boundary fluxes for $\mathbf{v} = \alpha \nabla u$, and computes
+    boundary fluxes for $u_t = \nabla \cdot \mathbf{v}$ using
 
     .. math::
 
@@ -207,9 +198,8 @@ class NeumannDiffusionBoundary(DiffusionBoundary):
         # Compute the flux directly instead of constructing an external v value
         # (and the associated TracePair); this approach is simpler in the
         # spatially-varying alpha case (the other approach would result in a
-        # v_tpair that lives in the quadrature discretization, as it involves
-        # computing sqrt(alpha); _u_flux would need to be modified to accept such
-        # values).
+        # v_tpair that lives in the quadrature discretization; _u_flux would need
+        # to be modified to accept such values).
         alpha_int_quad = discr.project("vol", dd_quad, alpha)
         value_quad = discr.project(dd, dd_quad, self.value)
         flux_quad = -alpha_int_quad*value_quad
@@ -243,7 +233,7 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, return_v=False):
         applied
     return_v: bool
         an optional flag indicating whether the auxiliary variable
-        $\mathbf{v} = \sqrt{\alpha} \nabla u$ should also be returned
+        $\mathbf{v} = \alpha \nabla u$ should also be returned
 
     Returns
     -------
@@ -270,17 +260,16 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, return_v=False):
     dd_allfaces_quad = DOFDesc("all_faces", quad_tag)
 
     alpha_quad = discr.project("vol", dd_quad, alpha)
-    sqrt_alpha_quad = _sqrt(actx, alpha_quad)
     grad_alpha_quad = discr.project("vol", dd_quad, _grad(discr, alpha))
 
     u_quad = discr.project("vol", dd_quad, u)
 
     v = discr.inverse_mass(
-        # Decompose phi_i*grad(sqrt(alpha)*phi_j) term via the product rule in
+        # Decompose phi_i*grad(alpha*phi_j) term via the product rule in
         # order to avoid having to define a new operator
-        discr.mass(dd_quad, -0.5/sqrt_alpha_quad * grad_alpha_quad * u_quad)
-        +  # noqa: W504
-        discr.weak_grad(dd_quad, -sqrt_alpha_quad * u_quad)
+        -discr.mass(dd_quad, grad_alpha_quad * u_quad)
+        -  # noqa: W504
+        discr.weak_grad(dd_quad, alpha_quad * u_quad)
         -  # noqa: W504
         discr.face_mass(
             dd_allfaces_quad,
@@ -300,20 +289,17 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, return_v=False):
     v_quad = discr.project("vol", dd_quad, v)
 
     result = discr.inverse_mass(
-        discr.weak_div(dd_quad, -sqrt_alpha_quad*v_quad)
+        -discr.weak_div(dd_quad, v_quad)
         -  # noqa: W504
         discr.face_mass(
             dd_allfaces_quad,
-            _u_flux(discr, quad_tag, interior_trace_pair(discr, alpha),
-                interior_trace_pair(discr, v))
+            _u_flux(discr, quad_tag, interior_trace_pair(discr, v))
             + sum(
                 bdry.get_u_flux(discr, quad_tag, as_dofdesc(btag), alpha, v)
                 for btag, bdry in boundaries.items())
             + sum(
-                _u_flux(discr, quad_tag, alpha_tpair, v_tpair)
-                for alpha_tpair, v_tpair in zip(
-                    cross_rank_trace_pairs(discr, alpha),
-                    cross_rank_trace_pairs(discr, v)))
+                _u_flux(discr, quad_tag, v_tpair)
+                for v_tpair in cross_rank_trace_pairs(discr, v))
             )
         )
 
