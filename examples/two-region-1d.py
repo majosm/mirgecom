@@ -152,14 +152,14 @@ def main():
 
     ones = discr.zeros(actx) + 1
 
-    f = alpha_lower*alpha_upper/(alpha_lower + alpha_upper)
+    f = -alpha_lower*alpha_upper/(alpha_lower + alpha_upper)
 
     u_exact = (
-          lower_mask * f/alpha_lower * (nodes[0] + 1)
-        + upper_mask * (1 + f/alpha_upper * (nodes[0] - 1)))
+          lower_mask * -f/alpha_lower * (nodes[0] + 1)
+        + upper_mask * (1 - f/alpha_upper * (nodes[0] - 1)))
     q_exact = (
-          lower_mask * f/math.sqrt(alpha_lower)
-        + upper_mask * f/math.sqrt(alpha_upper))
+          lower_mask * -f/math.sqrt(alpha_lower)
+        + upper_mask * -f/math.sqrt(alpha_upper))
     flux_exact = f * ones
 
     from pytools.obj_array import make_obj_array
@@ -188,7 +188,7 @@ def main():
                         ("u_exact", u_exact),
                         ("q", q[0]),
                         ("q_exact", q_exact),
-                        ("flux", q[0]*actx.np.sqrt(alpha)),
+                        ("flux", -q[0]*actx.np.sqrt(alpha)),
                         ("flux_exact", flux_exact),
                         ("alpha", alpha),
                         ])
