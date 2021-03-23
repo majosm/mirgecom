@@ -70,7 +70,7 @@ def get_mesh(nel):
             regions=grp_regions)],
         region_tags=region_tags)
 
-q = None
+v = None
 
 @mpi_entry_point
 def main():
@@ -157,20 +157,20 @@ def main():
     u_exact = (
           lower_mask * -f/alpha_lower * (nodes[0] + 1)
         + upper_mask * (1 - f/alpha_upper * (nodes[0] - 1)))
-    q_exact = (
+    v_exact = (
           lower_mask * -f/math.sqrt(alpha_lower)
         + upper_mask * -f/math.sqrt(alpha_upper))
     flux_exact = f * ones
 
     from pytools.obj_array import make_obj_array
-    global q
-    q = make_obj_array([discr.zeros(actx)])
+    global v
+    v = make_obj_array([discr.zeros(actx)])
 
     def rhs(t, u):
-        global q
-        result, q = diffusion_operator(
+        global v
+        result, v = diffusion_operator(
             discr, quad_tag=QTAG_NONE, alpha=alpha, boundaries=boundaries, u=u,
-            return_q=True)
+            return_v=True)
         return result
 
     rank = comm.Get_rank()
@@ -186,9 +186,9 @@ def main():
                     [
                         ("u", u),
                         ("u_exact", u_exact),
-                        ("q", q[0]),
-                        ("q_exact", q_exact),
-                        ("flux", -q[0]*actx.np.sqrt(alpha)),
+                        ("v", v[0]),
+                        ("v_exact", v_exact),
+                        ("flux", -v[0]*actx.np.sqrt(alpha)),
                         ("flux_exact", flux_exact),
                         ("alpha", alpha),
                         ])
