@@ -241,6 +241,9 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, return_q=False):
     u: Union[meshmode.dof_array.DOFArray, numpy.ndarray]
         the DOF array (or object array of DOF arrays) to which the operator should be
         applied
+    return_q: bool
+        an optional flag indicating whether the auxiliary variable
+        $\mathbf{q} = \sqrt{\alpha} \nabla u$ should also be returned
 
     Returns
     -------
@@ -253,8 +256,8 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, return_q=False):
         if len(boundaries) != len(u):
             raise TypeError("boundaries must be the same length as u")
         return obj_array_vectorize_n_args(lambda boundaries_i, u_i:
-            diffusion_operator(discr, quad_tag, alpha, boundaries_i, u_i),
-            make_obj_array(boundaries), u)
+            diffusion_operator(discr, quad_tag, alpha, boundaries_i, u_i,
+            return_q=return_q), make_obj_array(boundaries), u)
 
     for btag, bdry in boundaries.items():
         if not isinstance(bdry, DiffusionBoundary):
