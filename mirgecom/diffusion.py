@@ -173,12 +173,12 @@ class NeumannDiffusionBoundary(DiffusionBoundary):
 
     .. math::
 
-        \mathbf{F}\cdot\mathbf{\hat{n}} &= \alpha\nabla u\cdot\mathbf{\hat{n}}
+        \mathbf{F}\cdot\mathbf{\hat{n}} &= -\alpha\nabla u\cdot\mathbf{\hat{n}}
 
-                                        &= \alpha\frac{\partial u}{\partial
+                                        &= -\alpha\frac{\partial u}{\partial
                                                 \mathbf{n}}
 
-                                        &= \alpha g
+                                        &= -\alpha g
 
     .. automethod:: __init__
     """
