@@ -94,7 +94,7 @@ THE SOFTWARE.
 import numpy as np
 import loopy as lp
 from modepy import vandermonde
-from pytools.obj_array import obj_array_vectorize
+from pytools.obj_array import make_obj_array, obj_array_vectorize
 from meshmode.dof_array import thaw, DOFArray
 from meshmode.mesh import BTAG_ALL, BTAG_NONE  # noqa
 from grudge.eager import interior_trace_pair, cross_rank_trace_pairs
@@ -105,34 +105,40 @@ from mirgecom.fluid import (
 )
 
 
+def trace_pair_vectorize(f, tpair):
+    return make_obj_array([
+        f(TracePair(tpair.dd,
+            interior=tpair.int[i],
+            exterior=tpair.ext[i]))
+        for i in range(len(tpair.int))])
+
+
 def _facial_flux_q(discr, q_tpair):
     """Compute facial flux for each scalar component of Q."""
-    q_int = q_tpair.int
-    actx = q_int[0].array_context
+    if isinstance(q_tpair.int, np.ndarray):
+        return np.stack(trace_pair_vectorize(lambda tpair: _facial_flux_q(discr,
+            tpair), q_tpair), axis=0)
 
-    flux_dis = q_tpair.avg
-    if isinstance(flux_dis, np.ndarray):
-        flux_dis = flux_dis.reshape(-1, 1)
+    actx = q_tpair.int.array_context
 
     normal = thaw(actx, discr.normal(q_tpair.dd))
 
-    # This uses a central scalar flux along nhat:
-    # flux = 1/2 * (Q- + Q+) * nhat
-    flux_out = flux_dis * normal
+    flux_out = q_tpair.avg * normal
 
     return discr.project(q_tpair.dd, "all_faces", flux_out)
 
 
 def _facial_flux_r(discr, r_tpair):
     """Compute facial flux for vector component of grad(Q)."""
-    r_int = r_tpair.int
-    actx = r_int[0][0].array_context
+    if r_tpair.int.ndim == 2:
+        return trace_pair_vectorize(lambda tpair: _facial_flux_r(discr,
+            tpair), r_tpair)
+
+    actx = r_tpair.int[0].array_context
 
     normal = thaw(actx, discr.normal(r_tpair.dd))
 
-    # This uses a central vector flux along nhat:
-    # flux = 1/2 * (grad(Q)- + grad(Q)+) .dot. nhat
-    flux_out = r_tpair.avg @ normal
+    flux_out = np.dot(r_tpair.avg, normal)
 
     return discr.project(r_tpair.dd, "all_faces", flux_out)
 
