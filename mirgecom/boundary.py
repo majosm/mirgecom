@@ -40,7 +40,6 @@ from grudge.symbolic.primitives import TracePair
 from mirgecom.fluid import (
     split_conserved,
     join_conserved,
-    join_conserved_vectors
 )
 
 
@@ -202,4 +201,4 @@ class AdiabaticSlipBoundary:
         for ispec in range(num_species):
             result[dim+2+ispec] = -int_cv.species_mass[ispec]
 
-        return join_conserved_vectors(dim, result)
+        return result

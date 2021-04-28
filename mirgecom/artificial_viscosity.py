@@ -100,7 +100,6 @@ from grudge.symbolic.primitives import TracePair
 from grudge.dof_desc import DD_VOLUME_MODAL, DD_VOLUME
 from mirgecom.fluid import (
     split_conserved,
-    join_conserved_vectors
 )
 
 
@@ -172,7 +171,7 @@ def av_operator(discr, t, eos, boundaries, q, alpha, **kwargs):
     indicator = smoothness_indicator(discr, cv.mass, **kwargs)
 
     # R=Grad(Q) volume part
-    grad_q_vol = join_conserved_vectors(dim, obj_array_vectorize(discr.weak_grad, q))
+    grad_q_vol = np.stack(obj_array_vectorize(discr.weak_grad, q), axis=0)
 
     # R=Grad(Q) Q flux over interior faces
     q_flux_int = _facial_flux_q(discr, q_tpair=interior_trace_pair(discr, q))
