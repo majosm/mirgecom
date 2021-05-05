@@ -128,64 +128,6 @@ class AVBoundary(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
 
-class AVDirichletBoundary(AVBoundary):
-    """
-    Dirichlet boundary condition for the artificial viscosity operator.
-
-    Similar to :class:`~mirgecom.diffusion.DiffusionDirichletBoundary`.
-
-    .. automethod:: __init__
-    """
-
-    def __init__(self, value):
-        """
-        Initialize the boundary condition.
-
-        Parameters
-        ----------
-        value: float or meshmode.dof_array.DOFArray
-            the value(s) along the boundary
-        """
-        self.diffusion_bc = DiffusionDirichletBoundary(value)
-
-    def get_av_gradient_flux(self, discr, dd, alpha, q, **kwargs):  # noqa: D102
-        return self.diffusion_bc.get_diffusion_gradient_flux(discr, DISCR_TAG_BASE,
-            dd, alpha, q, **kwargs)
-
-    def get_av_flux(self, discr, dd, alpha, grad_q, **kwargs):  # noqa: D102
-        return self.diffusion_bc.get_diffusion_flux(discr, DISCR_TAG_BASE, dd,
-            alpha, grad_q, **kwargs)
-
-
-class AVNeumannBoundary(AVBoundary):
-    """
-    Neumann boundary condition for the artificial viscosity operator.
-
-    Similar to :class:`~mirgecom.diffusion.DiffusionNeumannBoundary`.
-
-    .. automethod:: __init__
-    """
-
-    def __init__(self, value):
-        """
-        Initialize the boundary condition.
-
-        Parameters
-        ----------
-        value: float or meshmode.dof_array.DOFArray
-            the value(s) along the boundary
-        """
-        self.diffusion_bc = DiffusionNeumannBoundary(value)
-
-    def get_av_gradient_flux(self, discr, dd, alpha, q, **kwargs):  # noqa: D102
-        return self.diffusion_bc.get_diffusion_gradient_flux(discr, DISCR_TAG_BASE,
-            dd, alpha, q, **kwargs)
-
-    def get_av_flux(self, discr, dd, alpha, grad_q, **kwargs):  # noqa: D102
-        return self.diffusion_bc.get_diffusion_flux(discr, DISCR_TAG_BASE, dd,
-            alpha, grad_q, **kwargs)
-
-
 class AVAggregateBoundary(AVBoundary):
     """
     Combined boundary condition for the non-scalar AV operator.
