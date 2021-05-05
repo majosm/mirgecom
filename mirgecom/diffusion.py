@@ -1,12 +1,14 @@
 r""":mod:`mirgecom.diffusion` computes the diffusion operator.
 
+Diffusion Operator Evaluation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 .. autofunction:: diffusion_gradient_flux
 .. autofunction:: diffusion_flux
 .. autofunction:: diffusion_operator
+
+Diffusion Boundary Specification
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 .. autoclass:: DiffusionBoundary
-.. autoclass:: DiffusionDirichletBoundary
-.. autoclass:: DiffusionNeumannBoundary
-.. autoclass:: DiffusionAggregateBoundary
 """
 
 __copyright__ = """
@@ -36,12 +38,30 @@ THE SOFTWARE.
 import abc
 import numpy as np
 import numpy.linalg as la  # noqa
-from pytools.obj_array import make_obj_array
 from meshmode.mesh import BTAG_ALL, BTAG_NONE  # noqa
 from meshmode.dof_array import thaw
 from grudge.dof_desc import DOFDesc, as_dofdesc
 from grudge.eager import interior_trace_pair, cross_rank_trace_pairs
 from grudge.symbolic.primitives import TracePair
+
+
+class DiffusionBoundary(metaclass=abc.ABCMeta):
+    """
+    Interface for diffusion boundary information retrieval.
+
+    .. automethod:: get_diffusion_gradient_flux
+    .. automethod:: get_diffusion_flux
+    """
+
+    @abc.abstractmethod
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha, u, **kwargs):
+        """Compute the flux for grad(u) on the boundary corresponding to *dd*."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u, **kwargs):
+        """Compute the flux for diff(u) on the boundary corresponding to *dd*."""
+        raise NotImplementedError
 
 
 def diffusion_gradient_flux(discr, quad_tag, u_tpair):
@@ -100,162 +120,6 @@ def diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair):
         )
 
     return discr.project(dd_quad, dd_allfaces_quad, flux_tpair.avg)
-
-
-class DiffusionBoundary(metaclass=abc.ABCMeta):
-    """
-    Diffusion boundary base class.
-
-    .. automethod:: get_diffusion_gradient_flux
-    .. automethod:: get_diffusion_flux
-    """
-
-    @abc.abstractmethod
-    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha, u, **kwargs):
-        """Compute the flux for grad(u) on the boundary corresponding to *dd*."""
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u, **kwargs):
-        """Compute the flux for diff(u) on the boundary corresponding to *dd*."""
-        raise NotImplementedError
-
-
-class DiffusionDirichletBoundary(DiffusionBoundary):
-    r"""
-    Dirichlet boundary condition for the diffusion operator.
-
-    For the boundary condition $u|_\Gamma = f$, uses external data
-
-    .. math::
-
-                 u^+ &= 2 f - u^-
-
-        (\nabla u)^+ &= (\nabla u)^-
-
-    to compute boundary fluxes as shown in [Hesthaven_2008]_, Section 7.1.
-
-    .. automethod:: __init__
-    """
-
-    def __init__(self, value):
-        """
-        Initialize the boundary condition.
-
-        Parameters
-        ----------
-        value: float or meshmode.dof_array.DOFArray
-            the value(s) of $f$ along the boundary
-        """
-        self.value = value
-
-    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha,
-            u, **kwargs):  # noqa: D102
-        u_int = discr.project("vol", dd, u)
-        u_tpair = TracePair(dd, interior=u_int, exterior=2*self.value-u_int)
-        return diffusion_gradient_flux(discr, quad_tag, u_tpair)
-
-    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u,
-            **kwargs):  # noqa: D102
-        alpha_int = discr.project("vol", dd, alpha)
-        alpha_tpair = TracePair(dd, interior=alpha_int, exterior=alpha_int)
-        grad_u_int = discr.project("vol", dd, grad_u)
-        grad_u_tpair = TracePair(dd, interior=grad_u_int, exterior=grad_u_int)
-        return diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair)
-
-
-class DiffusionNeumannBoundary(DiffusionBoundary):
-    r"""
-    Neumann boundary condition for the diffusion operator.
-
-    For the boundary condition $(\nabla u \cdot \mathbf{\hat{n}})|_\Gamma = g$, uses
-    external data
-
-    .. math::
-
-        u^+ = u^-
-
-    when computing the boundary fluxes for $\nabla u$, and uses
-
-    .. math::
-
-        (-\alpha \nabla u\cdot\mathbf{\hat{n}})|_\Gamma &=
-            -\alpha^- (\nabla u\cdot\mathbf{\hat{n}})|_\Gamma
-
-                                                        &= -\alpha^- g
-
-    when computing the boundary fluxes for $\nabla \cdot (\alpha \nabla u)$.
-
-    .. automethod:: __init__
-    """
-
-    def __init__(self, value):
-        """
-        Initialize the boundary condition.
-
-        Parameters
-        ----------
-        value: float or meshmode.dof_array.DOFArray
-            the value(s) of $g$ along the boundary
-        """
-        self.value = value
-
-    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha,
-            u, **kwargs):  # noqa: D102
-        u_int = discr.project("vol", dd, u)
-        u_tpair = TracePair(dd, interior=u_int, exterior=u_int)
-        return diffusion_gradient_flux(discr, quad_tag, u_tpair)
-
-    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u,
-            **kwargs):  # noqa: D102
-        dd_quad = dd.with_discr_tag(quad_tag)
-        dd_allfaces_quad = dd_quad.with_dtag("all_faces")
-        # Compute the flux directly instead of constructing an external grad_u value
-        # (and the associated TracePair); this approach is simpler in the
-        # spatially-varying alpha case (the other approach would result in a
-        # grad_u_tpair that lives in the quadrature discretization; diffusion_flux
-        # would need to be modified to accept such values).
-        alpha_int_quad = discr.project("vol", dd_quad, alpha)
-        value_quad = discr.project(dd, dd_quad, self.value)
-        flux_quad = -alpha_int_quad*value_quad
-        return discr.project(dd_quad, dd_allfaces_quad, flux_quad)
-
-
-class DiffusionAggregateBoundary(DiffusionBoundary):
-    """
-    Combined boundary condition for the non-scalar diffusion operator.
-
-    Aggregates BCs for multiple components into a single BC.
-
-    .. automethod:: __init__
-    """
-
-    def __init__(self, boundaries):
-        """
-        Initialize the boundary condition.
-
-        Parameters
-        ----------
-        boundaries:
-            a list or object array of :class:`DiffusionBoundary` instances
-        """
-        self.boundaries = boundaries.copy()
-
-    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha,
-            u, **kwargs):  # noqa: D102
-        component_fluxes = make_obj_array([
-            bdry.get_diffusion_gradient_flux(discr, quad_tag, dd, alpha, u[i])
-            for i, bdry in enumerate(self.boundaries)
-            ])
-        return np.stack(component_fluxes, axis=0)
-
-    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u,
-            **kwargs):  # noqa: D102
-        component_fluxes = make_obj_array([
-            bdry.get_diffusion_flux(discr, quad_tag, dd, alpha, grad_u[i])
-            for i, bdry in enumerate(self.boundaries)
-            ])
-        return component_fluxes
 
 
 def diffusion_operator(discr, quad_tag, alpha, boundaries, u, boundary_kwargs=None,

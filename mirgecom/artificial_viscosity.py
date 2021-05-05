@@ -104,19 +104,16 @@ import numpy as np
 
 from pytools import memoize_in, keyed_memoize_in
 from meshmode.dof_array import DOFArray
-from pytools.obj_array import make_obj_array
 from grudge.dof_desc import DD_VOLUME_MODAL, DD_VOLUME, DISCR_TAG_BASE
 from mirgecom.diffusion import (
     diffusion_operator,
     DiffusionBoundary,
-    DiffusionDirichletBoundary,
-    DiffusionNeumannBoundary,
 )
 
 
 class AVBoundary(metaclass=abc.ABCMeta):
     """
-    Artificial viscosity boundary base class.
+    Interface for artificial viscosity boundary information retrieval.
 
     .. automethod:: get_av_gradient_flux
     .. automethod:: get_av_flux
@@ -131,41 +128,6 @@ class AVBoundary(metaclass=abc.ABCMeta):
     def get_av_flux(self, discr, dd, alpha, grad_q, **kwargs):
         """Compute the flux for av(q) on the boundary corresponding to *dd*."""
         raise NotImplementedError
-
-
-class AVAggregateBoundary(AVBoundary):
-    """
-    Combined boundary condition for the non-scalar AV operator.
-
-    Aggregates BCs for multiple components into a single BC.
-
-    .. automethod:: __init__
-    """
-
-    def __init__(self, boundaries):
-        """
-        Initialize the boundary condition.
-
-        Parameters
-        ----------
-        boundaries:
-            a list or object array of :class:`AVBoundary` instances
-        """
-        self.boundaries = boundaries.copy()
-
-    def get_av_gradient_flux(self, discr, dd, alpha, q, **kwargs):  # noqa: D102
-        component_fluxes = make_obj_array([
-            bdry.get_av_gradient_flux(discr, dd, alpha, q[i], **kwargs)
-            for i, bdry in enumerate(self.boundaries)
-            ])
-        return np.stack(component_fluxes, axis=0)
-
-    def get_av_flux(self, discr, dd, alpha, grad_q, **kwargs):  # noqa: D102
-        component_fluxes = make_obj_array([
-            bdry.get_av_flux(discr, dd, alpha, grad_q[i], **kwargs)
-            for i, bdry in enumerate(self.boundaries)
-            ])
-        return component_fluxes
 
 
 class _AVToDiffusionAdapterBoundary(DiffusionBoundary):

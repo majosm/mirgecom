@@ -34,10 +34,11 @@ from grudge.eager import EagerDGDiscretization
 from grudge.shortcuts import make_visualizer
 from grudge.dof_desc import DISCR_TAG_BASE, DTAG_BOUNDARY
 from mirgecom.integrators import rk4_step
-from mirgecom.diffusion import (
-    diffusion_operator,
-    DiffusionDirichletBoundary,
-    DiffusionNeumannBoundary)
+from mirgecom.diffusion import diffusion_operator
+from mirgecom.boundary import (
+    DirichletBoundary,
+    NeumannBoundary
+)
 from mirgecom.mpi import mpi_entry_point
 import pyopencl.tools as cl_tools
 
@@ -99,8 +100,8 @@ def main():
     nodes = thaw(actx, discr.nodes())
 
     boundaries = {
-        DTAG_BOUNDARY("dirichlet"): DiffusionDirichletBoundary(0.),
-        DTAG_BOUNDARY("neumann"): DiffusionNeumannBoundary(0.)
+        DTAG_BOUNDARY("dirichlet"): DirichletBoundary(0.),
+        DTAG_BOUNDARY("neumann"): NeumannBoundary(0.)
     }
 
     u = discr.zeros(actx)
