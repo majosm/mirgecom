@@ -175,18 +175,7 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, boundary_kwargs=No
             + sum(
                 bdry.get_diffusion_gradient_flux(discr, quad_tag, as_dofdesc(btag),
                     u, **boundary_kwargs)
-                for btag, bdry in boundaries.items()
-                # FIXME: Remove this when unifying BCs
-                if isinstance(bdry, DiffusionBoundary))
-            # FIXME: Remove this when unifying BCs
-            + sum(
-                diffusion_gradient_flux(discr, quad_tag,
-                    TracePair(as_dofdesc(btag),
-                        interior=discr.project("vol", as_dofdesc(btag), u),
-                        exterior=bdry.exterior_q(discr, u, as_dofdesc(btag),
-                            **boundary_kwargs)))
-                for btag, bdry in boundaries.items()
-                if not isinstance(bdry, DiffusionBoundary))
+                for btag, bdry in boundaries.items())
             + sum(
                 diffusion_gradient_flux(discr, quad_tag, u_tpair)
                 for u_tpair in cross_rank_trace_pairs(discr, u))
@@ -206,24 +195,7 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, boundary_kwargs=No
             + sum(
                 bdry.get_diffusion_flux(discr, quad_tag, as_dofdesc(btag), alpha,
                     grad_u, **boundary_kwargs)
-                for btag, bdry in boundaries.items()
-                # FIXME: Remove this when unifying BCs
-                if isinstance(bdry, DiffusionBoundary))
-            # FIXME: Remove this when unifying BCs
-            + sum(
-                diffusion_flux(discr, quad_tag,
-                    # Dumb hack to avoid projecting alpha twice
-                    (lambda alpha_int:
-                        TracePair(as_dofdesc(btag),
-                            interior=alpha_int,
-                            exterior=alpha_int)
-                     )(discr.project("vol", as_dofdesc(btag), alpha)),
-                    TracePair(as_dofdesc(btag),
-                        interior=discr.project("vol", as_dofdesc(btag), grad_u),
-                        exterior=bdry.exterior_grad_q(discr, grad_u,
-                            as_dofdesc(btag), **boundary_kwargs)))
-                for btag, bdry in boundaries.items()
-                if not isinstance(bdry, DiffusionBoundary))
+                for btag, bdry in boundaries.items())
             + sum(
                 diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair)
                 for alpha_tpair, grad_u_tpair in zip(
