@@ -94,12 +94,146 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+import abc
 import numpy as np
 
 from pytools import memoize_in, keyed_memoize_in
 from meshmode.dof_array import DOFArray
+from pytools.obj_array import make_obj_array
 from grudge.dof_desc import DD_VOLUME_MODAL, DD_VOLUME, DISCR_TAG_BASE
-from mirgecom.diffusion import diffusion_operator
+from mirgecom.diffusion import (
+    diffusion_operator,
+    DiffusionBoundary,
+    DiffusionDirichletBoundary,
+    DiffusionNeumannBoundary,
+)
+
+
+class AVBoundary(metaclass=abc.ABCMeta):
+    """
+    Artificial viscosity boundary base class.
+
+    .. automethod:: get_av_gradient_flux
+    .. automethod:: get_av_flux
+    """
+
+    @abc.abstractmethod
+    def get_av_gradient_flux(self, discr, dd, alpha, q, **kwargs):
+        """Compute the flux for grad(q) on the boundary corresponding to *dd*."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def get_av_flux(self, discr, dd, alpha, grad_q, **kwargs):
+        """Compute the flux for av(q) on the boundary corresponding to *dd*."""
+        raise NotImplementedError
+
+
+class AVDirichletBoundary(AVBoundary):
+    """
+    Dirichlet boundary condition for the artificial viscosity operator.
+
+    Similar to :class:`~mirgecom.diffusion.DiffusionDirichletBoundary`.
+
+    .. automethod:: __init__
+    """
+
+    def __init__(self, value):
+        """
+        Initialize the boundary condition.
+
+        Parameters
+        ----------
+        value: float or meshmode.dof_array.DOFArray
+            the value(s) along the boundary
+        """
+        self.diffusion_bc = DiffusionDirichletBoundary(value)
+
+    def get_av_gradient_flux(self, discr, dd, alpha, q, **kwargs):  # noqa: D102
+        return self.diffusion_bc.get_diffusion_gradient_flux(discr, DISCR_TAG_BASE,
+            dd, alpha, q, **kwargs)
+
+    def get_av_flux(self, discr, dd, alpha, grad_q, **kwargs):  # noqa: D102
+        return self.diffusion_bc.get_diffusion_flux(discr, DISCR_TAG_BASE, dd,
+            alpha, grad_q, **kwargs)
+
+
+class AVNeumannBoundary(AVBoundary):
+    """
+    Neumann boundary condition for the artificial viscosity operator.
+
+    Similar to :class:`~mirgecom.diffusion.DiffusionNeumannBoundary`.
+
+    .. automethod:: __init__
+    """
+
+    def __init__(self, value):
+        """
+        Initialize the boundary condition.
+
+        Parameters
+        ----------
+        value: float or meshmode.dof_array.DOFArray
+            the value(s) along the boundary
+        """
+        self.diffusion_bc = DiffusionNeumannBoundary(value)
+
+    def get_av_gradient_flux(self, discr, dd, alpha, q, **kwargs):  # noqa: D102
+        return self.diffusion_bc.get_diffusion_gradient_flux(discr, DISCR_TAG_BASE,
+            dd, alpha, q, **kwargs)
+
+    def get_av_flux(self, discr, dd, alpha, grad_q, **kwargs):  # noqa: D102
+        return self.diffusion_bc.get_diffusion_flux(discr, DISCR_TAG_BASE, dd,
+            alpha, grad_q, **kwargs)
+
+
+class AVAggregateBoundary(AVBoundary):
+    """
+    Combined boundary condition for the non-scalar AV operator.
+
+    Aggregates BCs for multiple components into a single BC.
+
+    .. automethod:: __init__
+    """
+
+    def __init__(self, boundaries):
+        """
+        Initialize the boundary condition.
+
+        Parameters
+        ----------
+        boundaries:
+            a list or object array of :class:`AVBoundary` instances
+        """
+        self.boundaries = boundaries.copy()
+
+    def get_av_gradient_flux(self, discr, dd, alpha, q, **kwargs):  # noqa: D102
+        component_fluxes = make_obj_array([
+            bdry.get_av_gradient_flux(discr, dd, alpha, q[i], **kwargs)
+            for i, bdry in enumerate(self.boundaries)
+            ])
+        return np.stack(component_fluxes, axis=0)
+
+    def get_av_flux(self, discr, dd, alpha, grad_q, **kwargs):  # noqa: D102
+        component_fluxes = make_obj_array([
+            bdry.get_av_flux(discr, dd, alpha, grad_q[i], **kwargs)
+            for i, bdry in enumerate(self.boundaries)
+            ])
+        return component_fluxes
+
+
+class _AVToDiffusionAdapterBoundary(DiffusionBoundary):
+    def __init__(self, av_boundary):
+        self.av_boundary = av_boundary
+
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha,
+            q, **kwargs):  # noqa: D102
+        assert quad_tag == DISCR_TAG_BASE  # sanity check
+        return self.av_boundary.get_av_gradient_flux(discr, dd, alpha, q, **kwargs)
+
+    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_q,
+            **kwargs):  # noqa: D102
+        assert quad_tag == DISCR_TAG_BASE  # sanity check
+        return self.av_boundary.get_av_flux(discr, dd, alpha, grad_q, **kwargs)
 
 
 def av_operator(discr, boundaries, q, alpha, boundary_kwargs=None, **kwargs):
@@ -145,12 +279,20 @@ def av_operator(discr, boundaries, q, alpha, boundary_kwargs=None, **kwargs):
     if boundary_kwargs is None:
         boundary_kwargs = dict()
 
+    diffusion_boundaries = {
+        btag: (_AVToDiffusionAdapterBoundary(bdry)
+               # FIXME: Remove this when unifying BCs
+               if isinstance(bdry, AVBoundary)
+               else bdry)
+        for btag, bdry in boundaries.items()
+    }
+
     # Get smoothness indicator based on first component
     indicator_field = q[0] if isinstance(q, np.ndarray) else q
     indicator = smoothness_indicator(discr, indicator_field, **kwargs)
 
     return diffusion_operator(discr, quad_tag=DISCR_TAG_BASE,
-        alpha=alpha*indicator, boundaries=boundaries,
+        alpha=alpha*indicator, boundaries=diffusion_boundaries,
         boundary_kwargs=boundary_kwargs, u=q)
 
 
