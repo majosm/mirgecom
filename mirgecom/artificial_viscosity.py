@@ -68,6 +68,11 @@ AV RHS Evaluation
 ^^^^^^^^^^^^^^^^^
 
 .. autofunction:: av_operator
+
+AV Boundary Specification
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: AVBoundary
 """
 
 __copyright__ = """
