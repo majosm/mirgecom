@@ -4,9 +4,9 @@ r""":mod:`mirgecom.diffusion` computes the diffusion operator.
 .. autofunction:: diffusion_flux
 .. autofunction:: diffusion_operator
 .. autoclass:: DiffusionBoundary
-.. autoclass:: DirichletDiffusionBoundary
-.. autoclass:: NeumannDiffusionBoundary
-.. autoclass:: AggregateDiffusionBoundary
+.. autoclass:: DiffusionDirichletBoundary
+.. autoclass:: DiffusionNeumannBoundary
+.. autoclass:: DiffusionAggregateBoundary
 """
 
 __copyright__ = """
@@ -106,22 +106,22 @@ class DiffusionBoundary(metaclass=abc.ABCMeta):
     """
     Diffusion boundary base class.
 
-    .. automethod:: get_gradient_flux
+    .. automethod:: get_diffusion_gradient_flux
     .. automethod:: get_diffusion_flux
     """
 
     @abc.abstractmethod
-    def get_gradient_flux(self, discr, quad_tag, dd, alpha, u):
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha, u, **kwargs):
         """Compute the flux for grad(u) on the boundary corresponding to *dd*."""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u):
+    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u, **kwargs):
         """Compute the flux for diff(u) on the boundary corresponding to *dd*."""
         raise NotImplementedError
 
 
-class DirichletDiffusionBoundary(DiffusionBoundary):
+class DiffusionDirichletBoundary(DiffusionBoundary):
     r"""
     Dirichlet boundary condition for the diffusion operator.
 
@@ -149,12 +149,14 @@ class DirichletDiffusionBoundary(DiffusionBoundary):
         """
         self.value = value
 
-    def get_gradient_flux(self, discr, quad_tag, dd, alpha, u):  # noqa: D102
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha,
+            u, **kwargs):  # noqa: D102
         u_int = discr.project("vol", dd, u)
         u_tpair = TracePair(dd, interior=u_int, exterior=2*self.value-u_int)
         return gradient_flux(discr, quad_tag, u_tpair)
 
-    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u):  # noqa: D102
+    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u,
+            **kwargs):  # noqa: D102
         alpha_int = discr.project("vol", dd, alpha)
         alpha_tpair = TracePair(dd, interior=alpha_int, exterior=alpha_int)
         grad_u_int = discr.project("vol", dd, grad_u)
@@ -162,7 +164,7 @@ class DirichletDiffusionBoundary(DiffusionBoundary):
         return diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair)
 
 
-class NeumannDiffusionBoundary(DiffusionBoundary):
+class DiffusionNeumannBoundary(DiffusionBoundary):
     r"""
     Neumann boundary condition for the diffusion operator.
 
@@ -198,12 +200,14 @@ class NeumannDiffusionBoundary(DiffusionBoundary):
         """
         self.value = value
 
-    def get_gradient_flux(self, discr, quad_tag, dd, alpha, u):  # noqa: D102
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha,
+            u, **kwargs):  # noqa: D102
         u_int = discr.project("vol", dd, u)
         u_tpair = TracePair(dd, interior=u_int, exterior=u_int)
         return gradient_flux(discr, quad_tag, u_tpair)
 
-    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u):  # noqa: D102
+    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u,
+            **kwargs):  # noqa: D102
         dd_quad = dd.with_discr_tag(quad_tag)
         dd_allfaces_quad = dd_quad.with_dtag("all_faces")
         # Compute the flux directly instead of constructing an external grad_u value
@@ -217,11 +221,11 @@ class NeumannDiffusionBoundary(DiffusionBoundary):
         return discr.project(dd_quad, dd_allfaces_quad, flux_quad)
 
 
-class AggregateDiffusionBoundary(DiffusionBoundary):
+class DiffusionAggregateBoundary(DiffusionBoundary):
     """
-    Combined boundary condition for non-scalar diffusion operator.
+    Combined boundary condition for the non-scalar diffusion operator.
 
-    Aggregates diffusion BCs for multiple components into a single BC.
+    Aggregates BCs for multiple components into a single BC.
 
     .. automethod:: __init__
     """
@@ -237,14 +241,16 @@ class AggregateDiffusionBoundary(DiffusionBoundary):
         """
         self.boundaries = boundaries.copy()
 
-    def get_gradient_flux(self, discr, quad_tag, dd, alpha, u):  # noqa: D102
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha,
+            u, **kwargs):  # noqa: D102
         component_fluxes = make_obj_array([
-            bdry.get_gradient_flux(discr, quad_tag, dd, alpha, u[i])
+            bdry.get_diffusion_gradient_flux(discr, quad_tag, dd, alpha, u[i])
             for i, bdry in enumerate(self.boundaries)
             ])
         return np.stack(component_fluxes, axis=0)
 
-    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u):  # noqa: D102
+    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u,
+            **kwargs):  # noqa: D102
         component_fluxes = make_obj_array([
             bdry.get_diffusion_flux(discr, quad_tag, dd, alpha, grad_u[i])
             for i, bdry in enumerate(self.boundaries)
@@ -303,9 +309,12 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, boundary_kwargs=No
             dd_allfaces_quad,
             gradient_flux(discr, quad_tag, interior_trace_pair(discr, u))
             + sum(
-                bdry.get_gradient_flux(discr, quad_tag, as_dofdesc(btag), alpha, u)
+                bdry.get_diffusion_gradient_flux(discr, quad_tag, as_dofdesc(btag),
+                    alpha, u, **boundary_kwargs)
                 for btag, bdry in boundaries.items()
+                # FIXME: Remove this when unifying BCs
                 if isinstance(bdry, DiffusionBoundary))
+            # FIXME: Remove this when unifying BCs
             + sum(
                 gradient_flux(discr, quad_tag,
                     TracePair(as_dofdesc(btag),
@@ -332,9 +341,11 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, boundary_kwargs=No
                 interior_trace_pair(discr, grad_u))
             + sum(
                 bdry.get_diffusion_flux(discr, quad_tag, as_dofdesc(btag), alpha,
-                    grad_u)
+                    grad_u, **boundary_kwargs)
                 for btag, bdry in boundaries.items()
+                # FIXME: Remove this when unifying BCs
                 if isinstance(bdry, DiffusionBoundary))
+            # FIXME: Remove this when unifying BCs
             + sum(
                 diffusion_flux(discr, quad_tag,
                     # Dumb hack to avoid projecting alpha twice

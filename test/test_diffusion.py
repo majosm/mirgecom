@@ -29,9 +29,9 @@ import pymbolic.primitives as prim
 import mirgecom.symbolic as sym
 from mirgecom.diffusion import (
     diffusion_operator,
-    DirichletDiffusionBoundary,
-    NeumannDiffusionBoundary,
-    AggregateDiffusionBoundary)
+    DiffusionDirichletBoundary,
+    DiffusionNeumannBoundary,
+    DiffusionAggregateBoundary)
 from meshmode.dof_array import thaw, DOFArray
 from grudge.dof_desc import DTAG_BOUNDARY, DISCR_TAG_BASE, DISCR_TAG_QUAD
 
@@ -116,11 +116,11 @@ def get_decaying_trig(dim, alpha):
         boundaries = {}
 
         for i in range(dim-1):
-            boundaries[DTAG_BOUNDARY("-"+str(i))] = NeumannDiffusionBoundary(0.)
-            boundaries[DTAG_BOUNDARY("+"+str(i))] = NeumannDiffusionBoundary(0.)
+            boundaries[DTAG_BOUNDARY("-"+str(i))] = DiffusionNeumannBoundary(0.)
+            boundaries[DTAG_BOUNDARY("+"+str(i))] = DiffusionNeumannBoundary(0.)
 
-        boundaries[DTAG_BOUNDARY("-"+str(dim-1))] = DirichletDiffusionBoundary(0.)
-        boundaries[DTAG_BOUNDARY("+"+str(dim-1))] = DirichletDiffusionBoundary(0.)
+        boundaries[DTAG_BOUNDARY("-"+str(dim-1))] = DiffusionDirichletBoundary(0.)
+        boundaries[DTAG_BOUNDARY("+"+str(dim-1))] = DiffusionDirichletBoundary(0.)
 
         return boundaries
 
@@ -163,14 +163,14 @@ def get_decaying_trig_truncated_domain(dim, alpha):
             upper_grad_u = discr.project("vol", upper_btag, exact_grad_u)
             normal = thaw(actx, discr.normal(upper_btag))
             upper_grad_u_dot_n = np.dot(upper_grad_u, normal)
-            boundaries[lower_btag] = NeumannDiffusionBoundary(0.)
-            boundaries[upper_btag] = NeumannDiffusionBoundary(upper_grad_u_dot_n)
+            boundaries[lower_btag] = DiffusionNeumannBoundary(0.)
+            boundaries[upper_btag] = DiffusionNeumannBoundary(upper_grad_u_dot_n)
 
         lower_btag = DTAG_BOUNDARY("-"+str(dim-1))
         upper_btag = DTAG_BOUNDARY("+"+str(dim-1))
         upper_u = discr.project("vol", upper_btag, exact_u)
-        boundaries[lower_btag] = DirichletDiffusionBoundary(0.)
-        boundaries[upper_btag] = DirichletDiffusionBoundary(upper_u)
+        boundaries[lower_btag] = DiffusionDirichletBoundary(0.)
+        boundaries[upper_btag] = DiffusionDirichletBoundary(upper_u)
 
         return boundaries
 
@@ -206,11 +206,11 @@ def get_static_trig_var_diff(dim):
         boundaries = {}
 
         for i in range(dim-1):
-            boundaries[DTAG_BOUNDARY("-"+str(i))] = NeumannDiffusionBoundary(0.)
-            boundaries[DTAG_BOUNDARY("+"+str(i))] = NeumannDiffusionBoundary(0.)
+            boundaries[DTAG_BOUNDARY("-"+str(i))] = DiffusionNeumannBoundary(0.)
+            boundaries[DTAG_BOUNDARY("+"+str(i))] = DiffusionNeumannBoundary(0.)
 
-        boundaries[DTAG_BOUNDARY("-"+str(dim-1))] = DirichletDiffusionBoundary(0.)
-        boundaries[DTAG_BOUNDARY("+"+str(dim-1))] = DirichletDiffusionBoundary(0.)
+        boundaries[DTAG_BOUNDARY("-"+str(dim-1))] = DiffusionDirichletBoundary(0.)
+        boundaries[DTAG_BOUNDARY("+"+str(dim-1))] = DiffusionDirichletBoundary(0.)
 
         return boundaries
 
@@ -360,8 +360,8 @@ def test_diffusion_discontinuous_alpha(actx_factory, order, visualize=False):
     alpha = alpha_lower * lower_mask + alpha_upper * upper_mask
 
     boundaries = {
-        DTAG_BOUNDARY("-0"): DirichletDiffusionBoundary(0.),
-        DTAG_BOUNDARY("+0"): DirichletDiffusionBoundary(1.),
+        DTAG_BOUNDARY("-0"): DiffusionDirichletBoundary(0.),
+        DTAG_BOUNDARY("+0"): DiffusionDirichletBoundary(1.),
     }
 
     flux = -alpha_lower*alpha_upper/(alpha_lower + alpha_upper)
@@ -543,7 +543,7 @@ def test_diffusion_obj_array_vectorize(actx_factory):
     assert rel_linf_err < 1.e-5
 
     boundaries_combined = {
-        key: AggregateDiffusionBoundary([value, value])
+        key: DiffusionAggregateBoundary([value, value])
         for key, value in boundaries.items()
         }
     u_combined = make_obj_array([u1, u2])
