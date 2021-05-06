@@ -120,7 +120,7 @@ class AVBoundary(metaclass=abc.ABCMeta):
     """
 
     @abc.abstractmethod
-    def get_av_gradient_flux(self, discr, dd, alpha, q, **kwargs):
+    def get_av_gradient_flux(self, discr, dd, q, **kwargs):
         """Compute the flux for grad(q) on the boundary corresponding to *dd*."""
         raise NotImplementedError
 
@@ -134,10 +134,10 @@ class _AVToDiffusionAdapterBoundary(DiffusionBoundary):
     def __init__(self, av_boundary):
         self.av_boundary = av_boundary
 
-    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha,
-            q, **kwargs):  # noqa: D102
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, q,
+            **kwargs):  # noqa: D102
         assert quad_tag == DISCR_TAG_BASE  # sanity check
-        return self.av_boundary.get_av_gradient_flux(discr, dd, alpha, q, **kwargs)
+        return self.av_boundary.get_av_gradient_flux(discr, dd, q, **kwargs)
 
     def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_q,
             **kwargs):  # noqa: D102

@@ -228,8 +228,8 @@ class DirichletBoundary(DiffusionBoundary):
         """
         self.value = value
 
-    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha,
-            u, **kwargs):  # noqa: D102
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, u,
+            **kwargs):  # noqa: D102
         u_int = discr.project("vol", dd, u)
         u_tpair = TracePair(dd, interior=u_int, exterior=2*self.value-u_int)
         from mirgecom.diffusion import diffusion_gradient_flux
@@ -282,8 +282,8 @@ class NeumannBoundary(DiffusionBoundary):
         """
         self.value = value
 
-    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha,
-            u, **kwargs):  # noqa: D102
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, u,
+            **kwargs):  # noqa: D102
         u_int = discr.project("vol", dd, u)
         u_tpair = TracePair(dd, interior=u_int, exterior=u_int)
         from mirgecom.diffusion import diffusion_gradient_flux
@@ -322,10 +322,10 @@ class AggregateBoundary(DiffusionBoundary, AVBoundary):
         """
         self.boundaries = boundaries.copy()
 
-    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha,
-            u, **kwargs):  # noqa: D102
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, u,
+            **kwargs):  # noqa: D102
         component_fluxes = make_obj_array([
-            bdry.get_diffusion_gradient_flux(discr, quad_tag, dd, alpha, u[i])
+            bdry.get_diffusion_gradient_flux(discr, quad_tag, dd, u[i])
             for i, bdry in enumerate(self.boundaries)
             ])
         return np.stack(component_fluxes, axis=0)
@@ -338,9 +338,9 @@ class AggregateBoundary(DiffusionBoundary, AVBoundary):
             ])
         return component_fluxes
 
-    def get_av_gradient_flux(self, discr, dd, alpha, u, **kwargs):  # noqa: D102
+    def get_av_gradient_flux(self, discr, dd, u, **kwargs):  # noqa: D102
         component_fluxes = make_obj_array([
-            bdry.get_av_gradient_flux(discr, dd, alpha, u[i])
+            bdry.get_av_gradient_flux(discr, dd, u[i])
             for i, bdry in enumerate(self.boundaries)
             ])
         return np.stack(component_fluxes, axis=0)

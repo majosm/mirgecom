@@ -54,7 +54,7 @@ class DiffusionBoundary(metaclass=abc.ABCMeta):
     """
 
     @abc.abstractmethod
-    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, alpha, u, **kwargs):
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, u, **kwargs):
         """Compute the flux for grad(u) on the boundary corresponding to *dd*."""
         raise NotImplementedError
 
@@ -174,7 +174,7 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, boundary_kwargs=No
             diffusion_gradient_flux(discr, quad_tag, interior_trace_pair(discr, u))
             + sum(
                 bdry.get_diffusion_gradient_flux(discr, quad_tag, as_dofdesc(btag),
-                    alpha, u, **boundary_kwargs)
+                    u, **boundary_kwargs)
                 for btag, bdry in boundaries.items()
                 # FIXME: Remove this when unifying BCs
                 if isinstance(bdry, DiffusionBoundary))
