@@ -49,6 +49,11 @@ from mirgecom.artificial_viscosity import AVBoundary
 from mirgecom.diffusion import DiffusionBoundary
 
 
+def _one_sided_trace_pair(discr, dd, q):
+    q_int = discr.project("vol", dd, q)
+    return TracePair(dd, interior=q_int, exterior=q_int)
+
+
 class PrescribedBoundary(AVBoundary):
     """Boundary condition prescribes boundary soln with user-specified function.
 
@@ -91,14 +96,8 @@ class PrescribedBoundary(AVBoundary):
 
     def get_av_flux(self, discr, dd, alpha_indicator, grad_q,
             **kwargs):  # noqa: D102
-        alpha_indicator_int = discr.project("vol", dd, alpha_indicator)
-        alpha_indicator_tpair = TracePair(dd,
-            interior=alpha_indicator_int,
-            exterior=alpha_indicator_int)
-        grad_q_int = discr.project("vol", dd, grad_q)
-        grad_q_tpair = TracePair(dd,
-            interior=grad_q_int,
-            exterior=grad_q_int)
+        alpha_indicator_tpair = _one_sided_trace_pair(discr, dd, alpha_indicator)
+        grad_q_tpair = _one_sided_trace_pair(discr, dd, grad_q)
         from mirgecom.artificial_viscosity import av_flux
         return av_flux(discr, alpha_indicator_tpair, grad_q_tpair)
 
@@ -116,23 +115,14 @@ class DummyBoundary(AVBoundary):
         return TracePair(btag, interior=dir_soln, exterior=dir_soln)
 
     def get_av_gradient_flux(self, discr, dd, q, **kwargs):  # noqa: D102
-        q_int = discr.project("vol", dd, q)
-        q_tpair = TracePair(dd,
-            interior=q_int,
-            exterior=q_int)
+        q_tpair = _one_sided_trace_pair(discr, dd, q)
         from mirgecom.artificial_viscosity import av_gradient_flux
         return av_gradient_flux(discr, q_tpair)
 
     def get_av_flux(self, discr, dd, alpha_indicator, grad_q,
             **kwargs):  # noqa: D102
-        alpha_indicator_int = discr.project("vol", dd, alpha_indicator)
-        alpha_indicator_tpair = TracePair(dd,
-            interior=alpha_indicator_int,
-            exterior=alpha_indicator_int)
-        grad_q_int = discr.project("vol", dd, grad_q)
-        grad_q_tpair = TracePair(dd,
-            interior=grad_q_int,
-            exterior=grad_q_int)
+        alpha_indicator_tpair = _one_sided_trace_pair(discr, dd, alpha_indicator)
+        grad_q_tpair = _one_sided_trace_pair(discr, dd, grad_q)
         from mirgecom.artificial_viscosity import av_flux
         return av_flux(discr, alpha_indicator_tpair, grad_q_tpair)
 
@@ -223,7 +213,6 @@ class AdiabaticSlipBoundary(AVBoundary):
         """Get the interior and exterior solution on the boundary."""
         bndry_soln = self._get_exterior_q(discr, as_dofdesc(btag), q)
         int_soln = discr.project("vol", btag, q)
-
         return TracePair(btag, interior=int_soln, exterior=bndry_soln)
 
     def get_av_gradient_flux(self, discr, dd, q, **kwargs):  # noqa: D102
@@ -235,10 +224,7 @@ class AdiabaticSlipBoundary(AVBoundary):
 
     def get_av_flux(self, discr, dd, alpha_indicator, grad_q,
             **kwargs):  # noqa: D102
-        alpha_indicator_int = discr.project("vol", dd, alpha_indicator)
-        alpha_indicator_tpair = TracePair(dd,
-            interior=alpha_indicator_int,
-            exterior=alpha_indicator_int)
+        alpha_indicator_tpair = _one_sided_trace_pair(discr, dd, alpha_indicator)
         grad_q_tpair = TracePair(dd,
             interior=discr.project("vol", dd, grad_q),
             exterior=self._get_exterior_grad_q(discr, dd, grad_q))
@@ -285,10 +271,8 @@ class DirichletBoundary(DiffusionBoundary):
 
     def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u,
             **kwargs):  # noqa: D102
-        alpha_int = discr.project("vol", dd, alpha)
-        alpha_tpair = TracePair(dd, interior=alpha_int, exterior=alpha_int)
-        grad_u_int = discr.project("vol", dd, grad_u)
-        grad_u_tpair = TracePair(dd, interior=grad_u_int, exterior=grad_u_int)
+        alpha_tpair = _one_sided_trace_pair(discr, dd, alpha)
+        grad_u_tpair = _one_sided_trace_pair(discr, dd, grad_u)
         from mirgecom.diffusion import diffusion_flux
         return diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair)
 
@@ -332,8 +316,7 @@ class NeumannBoundary(DiffusionBoundary):
 
     def get_diffusion_gradient_flux(self, discr, quad_tag, dd, u,
             **kwargs):  # noqa: D102
-        u_int = discr.project("vol", dd, u)
-        u_tpair = TracePair(dd, interior=u_int, exterior=u_int)
+        u_tpair = _one_sided_trace_pair(discr, dd, u)
         from mirgecom.diffusion import diffusion_gradient_flux
         return diffusion_gradient_flux(discr, quad_tag, u_tpair)
 
