@@ -8,7 +8,7 @@ Diffusion Operator Evaluation
 
 Diffusion Boundary Specification
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-.. autoclass:: DiffusionBoundary
+.. autoclass:: DiffusionBoundaryInterface
 """
 
 __copyright__ = """
@@ -45,7 +45,7 @@ from grudge.eager import interior_trace_pair, cross_rank_trace_pairs
 from grudge.symbolic.primitives import TracePair
 
 
-class DiffusionBoundary(metaclass=abc.ABCMeta):
+class DiffusionBoundaryInterface(metaclass=abc.ABCMeta):
     """
     Interface for diffusion boundary information retrieval.
 
@@ -143,8 +143,8 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, boundary_kwargs=No
     alpha: numbers.Number or meshmode.dof_array.DOFArray
         the diffusivity value(s)
     boundaries:
-        dictionary mapping boundary tags to :class:`DiffusionBoundary` instances or
-        fluid boundary class instances
+        dictionary mapping boundary tags to objects implementing
+        :class:`DiffusionBoundaryInterface`
     u: meshmode.dof_array.DOFArray or numpy.ndarray
         the DOF array (or object array of DOF arrays) to which the operator should be
         applied
@@ -162,6 +162,11 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, boundary_kwargs=No
     """
     if boundary_kwargs is None:
         boundary_kwargs = dict()
+
+    for bdry in boundaries.values():
+        if not isinstance(bdry, DiffusionBoundaryInterface):
+            raise ValueError("Incompatible boundary; boundaries must implement "
+                "DiffusionBoundaryInterface.")
 
     dd_quad = DOFDesc("vol", quad_tag)
     dd_allfaces_quad = DOFDesc("all_faces", quad_tag)

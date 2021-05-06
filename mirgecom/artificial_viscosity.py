@@ -74,7 +74,7 @@ AV RHS Evaluation
 AV Boundary Specification
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. autoclass:: AVBoundary
+.. autoclass:: AVBoundaryInterface
 """
 
 __copyright__ = """
@@ -111,11 +111,11 @@ from mirgecom.diffusion import (
     diffusion_gradient_flux,
     diffusion_flux,
     diffusion_operator,
-    DiffusionBoundary,
+    DiffusionBoundaryInterface,
 )
 
 
-class AVBoundary(metaclass=abc.ABCMeta):
+class AVBoundaryInterface(metaclass=abc.ABCMeta):
     """
     Interface for artificial viscosity boundary information retrieval.
 
@@ -134,7 +134,7 @@ class AVBoundary(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
 
-class _AVToDiffusionAdapterBoundary(DiffusionBoundary):
+class _AVToDiffusionAdapterBoundary(DiffusionBoundaryInterface):
     def __init__(self, av_boundary):
         self.av_boundary = av_boundary
 
@@ -182,7 +182,8 @@ def av_operator(discr, boundaries, q, alpha, boundary_kwargs=None, **kwargs):
 
     boundaries: float
 
-        Dictionary of boundary functions, one for each valid boundary tag
+        Dictionary of boundary objects implementing :class:`AVBoundaryInterface`,
+        one for each valid boundary tag
 
     alpha: float
 
@@ -200,6 +201,11 @@ def av_operator(discr, boundaries, q, alpha, boundary_kwargs=None, **kwargs):
     """
     if boundary_kwargs is None:
         boundary_kwargs = dict()
+
+    for bdry in boundaries.values():
+        if not isinstance(bdry, AVBoundaryInterface):
+            raise ValueError("Incompatible boundary; boundaries must implement "
+                "AVBoundaryInterface.")
 
     diffusion_boundaries = {
         btag: _AVToDiffusionAdapterBoundary(bdry)

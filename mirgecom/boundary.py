@@ -45,8 +45,8 @@ from mirgecom.fluid import (
     split_conserved,
     join_conserved
 )
-from mirgecom.artificial_viscosity import AVBoundary
-from mirgecom.diffusion import DiffusionBoundary
+from mirgecom.artificial_viscosity import AVBoundaryInterface
+from mirgecom.diffusion import DiffusionBoundaryInterface
 
 
 def _one_sided_trace_pair(discr, dd, q):
@@ -54,7 +54,7 @@ def _one_sided_trace_pair(discr, dd, q):
     return TracePair(dd, interior=q_int, exterior=q_int)
 
 
-class PrescribedBoundary(AVBoundary):
+class PrescribedBoundary(AVBoundaryInterface):
     """Boundary condition prescribes boundary soln with user-specified function.
 
     .. automethod:: __init__
@@ -102,7 +102,7 @@ class PrescribedBoundary(AVBoundary):
         return av_flux(discr, alpha_indicator_tpair, grad_q_tpair)
 
 
-class DummyBoundary(AVBoundary):
+class DummyBoundary(AVBoundaryInterface):
     """Boundary condition that assigns boundary-adjacent soln as the boundary solution.
 
     .. automethod:: boundary_pair
@@ -127,7 +127,7 @@ class DummyBoundary(AVBoundary):
         return av_flux(discr, alpha_indicator_tpair, grad_q_tpair)
 
 
-class AdiabaticSlipBoundary(AVBoundary):
+class AdiabaticSlipBoundary(AVBoundaryInterface):
     r"""Boundary condition implementing inviscid slip boundary.
 
     a.k.a. Reflective inviscid wall boundary
@@ -232,7 +232,7 @@ class AdiabaticSlipBoundary(AVBoundary):
         return av_flux(discr, alpha_indicator_tpair, grad_q_tpair)
 
 
-class DirichletBoundary(DiffusionBoundary):
+class DirichletBoundary(DiffusionBoundaryInterface):
     r"""
     Dirichlet boundary condition.
 
@@ -277,7 +277,7 @@ class DirichletBoundary(DiffusionBoundary):
         return diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair)
 
 
-class NeumannBoundary(DiffusionBoundary):
+class NeumannBoundary(DiffusionBoundaryInterface):
     r"""
     Neumann boundary condition.
 
@@ -335,7 +335,7 @@ class NeumannBoundary(DiffusionBoundary):
         return discr.project(dd_quad, dd_allfaces_quad, flux_quad)
 
 
-class AggregateBoundary(DiffusionBoundary, AVBoundary):
+class AggregateBoundary(DiffusionBoundaryInterface, AVBoundaryInterface):
     """
     Combines multiple scalar boundaries into a single vector boundary.
 
