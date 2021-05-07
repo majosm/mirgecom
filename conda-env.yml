@@ -18,6 +18,6 @@ dependencies:
 - python=3.8
 - pip
 - pytest
-- cantera
+- cantera=2.5.1
 - gmsh
 - python-gmsh
