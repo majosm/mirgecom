@@ -19,3 +19,5 @@ dependencies:
 - pip
 - pytest
 - cantera
+- gmsh
+- python-gmsh
