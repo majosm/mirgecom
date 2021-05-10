@@ -67,7 +67,14 @@ Smoothness Indicator Evaluation
 AV RHS Evaluation
 ^^^^^^^^^^^^^^^^^
 
+.. autofunction:: av_gradient_flux
+.. autofunction:: av_flux
 .. autofunction:: av_operator
+
+AV Boundary Specification
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: AVBoundaryInterface
 """
 
 __copyright__ = """
@@ -94,12 +101,61 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+import abc
 import numpy as np
 
 from pytools import memoize_in, keyed_memoize_in
 from meshmode.dof_array import DOFArray
 from grudge.dof_desc import DD_VOLUME_MODAL, DD_VOLUME, DISCR_TAG_BASE
-from mirgecom.diffusion import diffusion_operator
+from mirgecom.diffusion import (
+    diffusion_gradient_flux,
+    diffusion_flux,
+    diffusion_operator,
+    DiffusionBoundaryInterface,
+)
+
+
+class AVBoundaryInterface(metaclass=abc.ABCMeta):
+    """
+    Interface for artificial viscosity boundary information retrieval.
+
+    .. automethod:: get_av_gradient_flux
+    .. automethod:: get_av_flux
+    """
+
+    @abc.abstractmethod
+    def get_av_gradient_flux(self, discr, dd, q, **kwargs):
+        r"""Compute the numerical boundary flux for $\nabla \mathbf{Q}$."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def get_av_flux(self, discr, dd, alpha_indicator, grad_q, **kwargs):
+        """Compute the numerical boundary flux for the AV operator."""
+        raise NotImplementedError
+
+
+class _AVToDiffusionAdapterBoundary(DiffusionBoundaryInterface):
+    def __init__(self, av_boundary):
+        self.av_boundary = av_boundary
+
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, q,
+            **kwargs):  # noqa: D102
+        assert quad_tag == DISCR_TAG_BASE  # sanity check
+        return self.av_boundary.get_av_gradient_flux(discr, dd, q, **kwargs)
+
+    # Note: alpha here is the *diffusion* alpha (= "av alpha" * indicator)
+    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_q,
+            **kwargs):  # noqa: D102
+        assert quad_tag == DISCR_TAG_BASE  # sanity check
+        return self.av_boundary.get_av_flux(discr, dd, alpha, grad_q, **kwargs)
+
+
+def av_gradient_flux(discr, q_tpair):
+    return diffusion_gradient_flux(discr, DISCR_TAG_BASE, q_tpair)
+
+
+def av_flux(discr, alpha_indicator_tpair, grad_q_tpair):
+    return diffusion_flux(discr, DISCR_TAG_BASE, alpha_indicator_tpair, grad_q_tpair)
 
 
 def av_operator(discr, boundaries, q, alpha, boundary_kwargs=None, **kwargs):
@@ -126,7 +182,8 @@ def av_operator(discr, boundaries, q, alpha, boundary_kwargs=None, **kwargs):
 
     boundaries: float
 
-        Dictionary of boundary functions, one for each valid boundary tag
+        Dictionary of boundary objects implementing :class:`AVBoundaryInterface`,
+        one for each valid boundary tag
 
     alpha: float
 
@@ -145,12 +202,22 @@ def av_operator(discr, boundaries, q, alpha, boundary_kwargs=None, **kwargs):
     if boundary_kwargs is None:
         boundary_kwargs = dict()
 
+    for bdry in boundaries.values():
+        if not isinstance(bdry, AVBoundaryInterface):
+            raise ValueError("Incompatible boundary; boundaries must implement "
+                "AVBoundaryInterface.")
+
+    diffusion_boundaries = {
+        btag: _AVToDiffusionAdapterBoundary(bdry)
+        for btag, bdry in boundaries.items()
+    }
+
     # Get smoothness indicator based on first component
     indicator_field = q[0] if isinstance(q, np.ndarray) else q
     indicator = smoothness_indicator(discr, indicator_field, **kwargs)
 
     return diffusion_operator(discr, quad_tag=DISCR_TAG_BASE,
-        alpha=alpha*indicator, boundaries=boundaries,
+        alpha=alpha*indicator, boundaries=diffusion_boundaries,
         boundary_kwargs=boundary_kwargs, u=q)
 
 

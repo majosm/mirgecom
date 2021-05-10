@@ -6,6 +6,9 @@ Boundary Conditions
 .. autoclass:: PrescribedBoundary
 .. autoclass:: DummyBoundary
 .. autoclass:: AdiabaticSlipBoundary
+.. autoclass:: DirichletBoundary
+.. autoclass:: NeumannBoundary
+.. autoclass:: AggregateBoundary
 """
 
 __copyright__ = """
@@ -33,16 +36,25 @@ THE SOFTWARE.
 """
 
 import numpy as np
+from pytools.obj_array import make_obj_array
 from meshmode.dof_array import thaw
 from meshmode.mesh import BTAG_ALL, BTAG_NONE  # noqa
+from grudge.dof_desc import as_dofdesc
 from grudge.symbolic.primitives import TracePair
 from mirgecom.fluid import (
     split_conserved,
     join_conserved
 )
+from mirgecom.artificial_viscosity import AVBoundaryInterface
+from mirgecom.diffusion import DiffusionBoundaryInterface
 
 
-class PrescribedBoundary:
+def _one_sided_trace_pair(discr, dd, q):
+    q_int = discr.project("vol", dd, q)
+    return TracePair(dd, interior=q_int, exterior=q_int)
+
+
+class PrescribedBoundary(AVBoundaryInterface):
     """Boundary condition prescribes boundary soln with user-specified function.
 
     .. automethod:: __init__
@@ -62,48 +74,60 @@ class PrescribedBoundary:
         """
         self._userfunc = userfunc
 
+    def _get_exterior_q(self, discr, dd, q, **kwargs):
+        actx = q[0].array_context
+        boundary_discr = discr.discr_from_dd(dd)
+        nodes = thaw(actx, boundary_discr.nodes())
+        return self._userfunc(nodes, **kwargs)
+
+    # FIXME: Use dd instead of btag?
     def boundary_pair(self, discr, q, btag, **kwargs):
         """Get the interior and exterior solution on the boundary."""
-        ext_soln = self.exterior_q(discr, q, btag, **kwargs)
         int_soln = discr.project("vol", btag, q)
+        ext_soln = self._get_exterior_q(discr, as_dofdesc(btag), q, **kwargs)
         return TracePair(btag, interior=int_soln, exterior=ext_soln)
 
-    def exterior_q(self, discr, q, btag, **kwargs):
-        """Get the exterior solution on the boundary."""
-        actx = q[0].array_context
+    def get_av_gradient_flux(self, discr, dd, q, **kwargs):  # noqa: D102
+        q_tpair = TracePair(dd,
+            interior=discr.project("vol", dd, q),
+            exterior=self._get_exterior_q(discr, dd, q, **kwargs))
+        from mirgecom.artificial_viscosity import av_gradient_flux
+        return av_gradient_flux(discr, q_tpair)
 
-        boundary_discr = discr.discr_from_dd(btag)
-        nodes = thaw(actx, boundary_discr.nodes())
-        ext_soln = self._userfunc(nodes, **kwargs)
-        return ext_soln
-
-    def exterior_grad_q(self, discr, grad_q, btag, **kwargs):
-        """Get the exterior solution on the boundary."""
-        return discr.project("vol", btag, grad_q)
+    def get_av_flux(self, discr, dd, alpha_indicator, grad_q,
+            **kwargs):  # noqa: D102
+        alpha_indicator_tpair = _one_sided_trace_pair(discr, dd, alpha_indicator)
+        grad_q_tpair = _one_sided_trace_pair(discr, dd, grad_q)
+        from mirgecom.artificial_viscosity import av_flux
+        return av_flux(discr, alpha_indicator_tpair, grad_q_tpair)
 
 
-class DummyBoundary:
+class DummyBoundary(AVBoundaryInterface):
     """Boundary condition that assigns boundary-adjacent soln as the boundary solution.
 
     .. automethod:: boundary_pair
     """
 
+    # FIXME: Use dd instead of btag?
     def boundary_pair(self, discr, q, btag, **kwargs):
         """Get the interior and exterior solution on the boundary."""
-        dir_soln = self.exterior_q(discr, q, btag, **kwargs)
+        dir_soln = discr.project("vol", btag, q)
         return TracePair(btag, interior=dir_soln, exterior=dir_soln)
 
-    def exterior_q(self, discr, q, btag, **kwargs):
-        """Get the exterior solution on the boundary."""
-        dir_soln = discr.project("vol", btag, q)
-        return dir_soln
+    def get_av_gradient_flux(self, discr, dd, q, **kwargs):  # noqa: D102
+        q_tpair = _one_sided_trace_pair(discr, dd, q)
+        from mirgecom.artificial_viscosity import av_gradient_flux
+        return av_gradient_flux(discr, q_tpair)
 
-    def exterior_grad_q(self, discr, grad_q, btag, **kwargs):
-        """Get the grad_q on the exterior of the boundary."""
-        return discr.project("vol", btag, grad_q)
+    def get_av_flux(self, discr, dd, alpha_indicator, grad_q,
+            **kwargs):  # noqa: D102
+        alpha_indicator_tpair = _one_sided_trace_pair(discr, dd, alpha_indicator)
+        grad_q_tpair = _one_sided_trace_pair(discr, dd, grad_q)
+        from mirgecom.artificial_viscosity import av_flux
+        return av_flux(discr, alpha_indicator_tpair, grad_q_tpair)
 
 
-class AdiabaticSlipBoundary:
+class AdiabaticSlipBoundary(AVBoundaryInterface):
     r"""Boundary condition implementing inviscid slip boundary.
 
     a.k.a. Reflective inviscid wall boundary
@@ -121,14 +145,7 @@ class AdiabaticSlipBoundary:
     .. automethod:: boundary_pair
     """
 
-    def boundary_pair(self, discr, q, btag, **kwargs):
-        """Get the interior and exterior solution on the boundary."""
-        bndry_soln = self.exterior_q(discr, q, btag, **kwargs)
-        int_soln = discr.project("vol", btag, q)
-
-        return TracePair(btag, interior=int_soln, exterior=bndry_soln)
-
-    def exterior_q(self, discr, q, btag, **kwargs):
+    def _get_exterior_q(self, discr, dd, q):
         """Get the exterior solution on the boundary.
 
         The exterior solution is set such that there will be vanishing
@@ -145,10 +162,10 @@ class AdiabaticSlipBoundary:
         actx = cv.mass.array_context
 
         # Grab a unit normal to the boundary
-        nhat = thaw(actx, discr.normal(btag))
+        nhat = thaw(actx, discr.normal(dd))
 
         # Get the interior/exterior solns
-        int_soln = discr.project("vol", btag, q)
+        int_soln = discr.project("vol", dd, q)
         int_cv = split_conserved(dim, int_soln)
 
         # Subtract out the 2*wall-normal component
@@ -167,7 +184,7 @@ class AdiabaticSlipBoundary:
 
         return bndry_soln
 
-    def exterior_grad_q(self, discr, grad_q, btag, **kwargs):
+    def _get_exterior_grad_q(self, discr, dd, grad_q):
         """Get the exterior grad(Q) on the boundary."""
         # Grab some boundary-relevant data
         num_equations, dim = grad_q.shape
@@ -175,10 +192,10 @@ class AdiabaticSlipBoundary:
         actx = cv.mass[0].array_context
 
         # Grab a unit normal to the boundary
-        normal = thaw(actx, discr.normal(btag))
+        normal = thaw(actx, discr.normal(dd))
 
         # Get the interior soln
-        gradq_int = discr.project("vol", btag, grad_q)
+        gradq_int = discr.project("vol", dd, grad_q)
         gradq_comp = split_conserved(dim, gradq_int)
 
         # Subtract 2*wall-normal component of q
@@ -190,3 +207,179 @@ class AdiabaticSlipBoundary:
         return join_conserved(dim, mass=-gradq_comp.mass, energy=-gradq_comp.energy,
                               momentum=-s_mom_flux,
                               species_mass=-gradq_comp.species_mass)
+
+    # FIXME: Use dd instead of btag?
+    def boundary_pair(self, discr, q, btag, **kwargs):
+        """Get the interior and exterior solution on the boundary."""
+        bndry_soln = self._get_exterior_q(discr, as_dofdesc(btag), q)
+        int_soln = discr.project("vol", btag, q)
+        return TracePair(btag, interior=int_soln, exterior=bndry_soln)
+
+    def get_av_gradient_flux(self, discr, dd, q, **kwargs):  # noqa: D102
+        q_tpair = TracePair(dd,
+            interior=discr.project("vol", dd, q),
+            exterior=self._get_exterior_q(discr, dd, q))
+        from mirgecom.artificial_viscosity import av_gradient_flux
+        return av_gradient_flux(discr, q_tpair)
+
+    def get_av_flux(self, discr, dd, alpha_indicator, grad_q,
+            **kwargs):  # noqa: D102
+        alpha_indicator_tpair = _one_sided_trace_pair(discr, dd, alpha_indicator)
+        grad_q_tpair = TracePair(dd,
+            interior=discr.project("vol", dd, grad_q),
+            exterior=self._get_exterior_grad_q(discr, dd, grad_q))
+        from mirgecom.artificial_viscosity import av_flux
+        return av_flux(discr, alpha_indicator_tpair, grad_q_tpair)
+
+
+class DirichletBoundary(DiffusionBoundaryInterface):
+    r"""
+    Dirichlet boundary condition.
+
+    Enforces the boundary condition $u|_\Gamma = f$.
+
+    For the diffusion operator, uses
+
+    .. math::
+
+                 u^+ &= 2 f - u^-
+
+        (\nabla u)^+ &= (\nabla u)^-
+
+    to compute boundary fluxes as shown in [Hesthaven_2008]_, Section 7.1.
+
+    .. automethod:: __init__
+    """
+
+    def __init__(self, value):
+        """
+        Initialize the boundary condition.
+
+        Parameters
+        ----------
+        value: float or meshmode.dof_array.DOFArray
+            the value(s) of $f$ along the boundary
+        """
+        self.value = value
+
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, u,
+            **kwargs):  # noqa: D102
+        u_int = discr.project("vol", dd, u)
+        u_tpair = TracePair(dd, interior=u_int, exterior=2*self.value-u_int)
+        from mirgecom.diffusion import diffusion_gradient_flux
+        return diffusion_gradient_flux(discr, quad_tag, u_tpair)
+
+    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u,
+            **kwargs):  # noqa: D102
+        alpha_tpair = _one_sided_trace_pair(discr, dd, alpha)
+        grad_u_tpair = _one_sided_trace_pair(discr, dd, grad_u)
+        from mirgecom.diffusion import diffusion_flux
+        return diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair)
+
+
+class NeumannBoundary(DiffusionBoundaryInterface):
+    r"""
+    Neumann boundary condition.
+
+    Enforces the boundary condition $(\nabla u \cdot \mathbf{\hat{n}})|_\Gamma = g$.
+
+    For the diffusion operator, uses
+
+    .. math::
+
+        u^+ = u^-
+
+    when computing the boundary fluxes for $\nabla u$, and uses
+
+    .. math::
+
+        (-\alpha \nabla u\cdot\mathbf{\hat{n}})|_\Gamma &=
+            -\alpha^- (\nabla u\cdot\mathbf{\hat{n}})|_\Gamma
+
+                                                        &= -\alpha^- g
+
+    when computing the boundary fluxes for $\nabla \cdot (\alpha \nabla u)$.
+
+    .. automethod:: __init__
+    """
+
+    def __init__(self, value):
+        """
+        Initialize the boundary condition.
+
+        Parameters
+        ----------
+        value: float or meshmode.dof_array.DOFArray
+            the value(s) of $g$ along the boundary
+        """
+        self.value = value
+
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, u,
+            **kwargs):  # noqa: D102
+        u_tpair = _one_sided_trace_pair(discr, dd, u)
+        from mirgecom.diffusion import diffusion_gradient_flux
+        return diffusion_gradient_flux(discr, quad_tag, u_tpair)
+
+    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u,
+            **kwargs):  # noqa: D102
+        dd_quad = dd.with_qtag(quad_tag)
+        dd_allfaces_quad = dd_quad.with_dtag("all_faces")
+        # Compute the flux directly instead of constructing an external grad_u value
+        # (and the associated TracePair); this approach is simpler in the
+        # spatially-varying alpha case (the other approach would result in a
+        # grad_u_tpair that lives in the quadrature discretization; diffusion_flux
+        # would need to be modified to accept such values).
+        alpha_int_quad = discr.project("vol", dd_quad, alpha)
+        value_quad = discr.project(dd, dd_quad, self.value)
+        flux_quad = -alpha_int_quad*value_quad
+        return discr.project(dd_quad, dd_allfaces_quad, flux_quad)
+
+
+class AggregateBoundary(DiffusionBoundaryInterface, AVBoundaryInterface):
+    """
+    Combines multiple scalar boundaries into a single vector boundary.
+
+    .. automethod:: __init__
+    """
+
+    def __init__(self, boundaries):
+        """
+        Initialize the boundary condition.
+
+        Parameters
+        ----------
+        boundaries:
+            a list or object array of boundaries
+        """
+        self.boundaries = boundaries.copy()
+
+    def get_diffusion_gradient_flux(self, discr, quad_tag, dd, u,
+            **kwargs):  # noqa: D102
+        component_fluxes = make_obj_array([
+            bdry.get_diffusion_gradient_flux(discr, quad_tag, dd, u[i])
+            for i, bdry in enumerate(self.boundaries)
+            ])
+        return np.stack(component_fluxes, axis=0)
+
+    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u,
+            **kwargs):  # noqa: D102
+        component_fluxes = make_obj_array([
+            bdry.get_diffusion_flux(discr, quad_tag, dd, alpha, grad_u[i])
+            for i, bdry in enumerate(self.boundaries)
+            ])
+        return component_fluxes
+
+    def get_av_gradient_flux(self, discr, dd, q, **kwargs):  # noqa: D102
+        component_fluxes = make_obj_array([
+            bdry.get_av_gradient_flux(discr, dd, q[i])
+            for i, bdry in enumerate(self.boundaries)
+            ])
+        return np.stack(component_fluxes, axis=0)
+
+    def get_av_flux(self, discr, dd, alpha_indicator, grad_q,
+            **kwargs):  # noqa: D102
+        component_fluxes = make_obj_array([
+            bdry.get_av_flux(discr, dd, alpha_indicator, grad_q[i])
+            for i, bdry in enumerate(self.boundaries)
+            ])
+        return component_fluxes
