@@ -55,12 +55,12 @@ class DiffusionBoundaryInterface(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def get_diffusion_gradient_flux(self, discr, quad_tag, dd, u, **kwargs):
-        """Compute the flux for grad(u) on the boundary corresponding to *dd*."""
+        r"""Compute the numerical boundary flux for $\nabla u$."""
         raise NotImplementedError
 
     @abc.abstractmethod
     def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u, **kwargs):
-        """Compute the flux for diff(u) on the boundary corresponding to *dd*."""
+        """Compute the numerical boundary flux for the diffusion operator."""
         raise NotImplementedError
 
 
