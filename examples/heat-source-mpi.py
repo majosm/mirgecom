@@ -100,8 +100,8 @@ def main():
     nodes = thaw(actx, discr.nodes())
 
     boundaries = {
-        DTAG_BOUNDARY("dirichlet"): DirichletBoundary(0.),
-        DTAG_BOUNDARY("neumann"): NeumannBoundary(0.)
+        DTAG_BOUNDARY("dirichlet"): DirichletBoundary(lambda t: 5*(100*t)**2),
+        DTAG_BOUNDARY("neumann"): NeumannBoundary(lambda t: 0.)
     }
 
     u = discr.zeros(actx)
@@ -112,7 +112,8 @@ def main():
         return (
             diffusion_operator(
                 discr, quad_tag=DISCR_TAG_BASE,
-                alpha=1, boundaries=boundaries, u=u)
+                alpha=1, boundaries=boundaries,
+                boundary_kwargs={"t": t}, u=u)
             + actx.np.exp(-np.dot(nodes, nodes)/source_width**2))
 
     rank = comm.Get_rank()

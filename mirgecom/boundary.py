@@ -35,6 +35,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+from typing import Callable
 import numpy as np
 from pytools.obj_array import make_obj_array
 from meshmode.dof_array import thaw
@@ -257,15 +258,20 @@ class DirichletBoundary(DiffusionBoundaryInterface):
 
         Parameters
         ----------
-        value: float or meshmode.dof_array.DOFArray
+        value: float or meshmode.dof_array.DOFArray or Callable
             the value(s) of $f$ along the boundary
         """
-        self.value = value
+        if isinstance(value, Callable):
+            self.value_func = value
+        else:
+            self.value_func = lambda: value
 
     def get_diffusion_gradient_flux(self, discr, quad_tag, dd, u,
             **kwargs):  # noqa: D102
         u_int = discr.project("vol", dd, u)
-        u_tpair = TracePair(dd, interior=u_int, exterior=2*self.value-u_int)
+        u_tpair = TracePair(dd,
+            interior=u_int,
+            exterior=2*self.value_func(**kwargs) - u_int)
         from mirgecom.diffusion import diffusion_gradient_flux
         return diffusion_gradient_flux(discr, quad_tag, u_tpair)
 
@@ -309,10 +315,13 @@ class NeumannBoundary(DiffusionBoundaryInterface):
 
         Parameters
         ----------
-        value: float or meshmode.dof_array.DOFArray
+        value: float or meshmode.dof_array.DOFArray or Callable
             the value(s) of $g$ along the boundary
         """
-        self.value = value
+        if isinstance(value, Callable):
+            self.value_func = value
+        else:
+            self.value_func = lambda: value
 
     def get_diffusion_gradient_flux(self, discr, quad_tag, dd, u,
             **kwargs):  # noqa: D102
@@ -330,7 +339,7 @@ class NeumannBoundary(DiffusionBoundaryInterface):
         # grad_u_tpair that lives in the quadrature discretization; diffusion_flux
         # would need to be modified to accept such values).
         alpha_int_quad = discr.project("vol", dd_quad, alpha)
-        value_quad = discr.project(dd, dd_quad, self.value)
+        value_quad = discr.project(dd, dd_quad, self.value_func(**kwargs))
         flux_quad = -alpha_int_quad*value_quad
         return discr.project(dd_quad, dd_allfaces_quad, flux_quad)
 
