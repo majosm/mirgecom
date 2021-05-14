@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+import math
 import numpy as np
 import pyopencl.array as cla  # noqa
 import pyopencl.clmath as clmath # noqa
@@ -273,6 +274,65 @@ def test_wave_stability(actx_factory, problem, timestep_scale, order,
     max_err = discr.norm(expected_fields, np.inf)
 
     assert err < max_err
+
+
+@pytest.mark.parametrize("order", [1])
+def test_wave_alternate_accuracy(actx_factory, order):
+    """Checks accuracy of the wave operator for a given problem setup.
+    """
+    actx = actx_factory()
+
+    dim = 1
+
+    def w_func(x, t):
+        return flat_obj_array(
+            actx.np.sin(x)*math.cos(t),
+            -actx.np.sin(x)*math.sin(t) + actx.np.cos(x)*math.cos(t)
+            )
+
+    from pytools.convergence import EOCRecorder
+    eoc_rec = EOCRecorder()
+
+    for n in [8, 12, 16, 24]:
+        from meshmode.mesh.generation import generate_regular_rect_mesh
+        mesh = generate_regular_rect_mesh(
+            a=(-np.pi,)*dim,
+            b=(np.pi,)*dim,
+            nelements_per_axis=(n,)*dim)
+
+        from grudge.eager import EagerDGDiscretization
+        discr = EagerDGDiscretization(actx, mesh, order=order)
+
+        nodes = thaw(actx, discr.nodes())
+
+        fields = w_func(nodes[0], 0)
+
+        from mirgecom.wave import wave_operator_alternate
+        def rhs(t, w):
+            return wave_operator_alternate(discr, c=1, w=fields,
+                w_func=lambda x: w_func(x, t))
+
+        from mirgecom.integrators import rk4_step
+        dt = 0.1 / (n * order ** 2)
+        nsteps = 100
+        t = 0
+        istep = 0
+        while istep < nsteps:
+            fields = rk4_step(fields, t, dt, rhs)
+            t += dt
+            istep += 1
+
+        expected_fields = w_func(nodes[0], t)
+
+        rel_l2_err = (
+            discr.norm(fields - expected_fields, 2)
+            / discr.norm(expected_fields, 2))
+        eoc_rec.add_data_point(1./n, rel_l2_err)
+
+    print("Approximation error:")
+    print(eoc_rec)
+    assert(eoc_rec.order_estimate() >= order - 0.5 or eoc_rec.max_error() < 1e-11)
+
 
 
 if __name__ == "__main__":
