@@ -22,6 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+import math
 import numpy as np
 import numpy.linalg as la  # noqa
 import pyopencl as cl
@@ -29,7 +30,7 @@ import pyopencl.array as cla  # noqa
 from pytools.obj_array import flat_obj_array
 from grudge.eager import EagerDGDiscretization
 from grudge.shortcuts import make_visualizer
-from mirgecom.wave import wave_operator
+from mirgecom.wave import wave_operator, wave_operator_alternate
 from mirgecom.integrators import rk4_step
 from meshmode.dof_array import thaw
 from meshmode.array_context import PyOpenCLArrayContext
@@ -70,18 +71,21 @@ def main(use_profiling=False):
         actx = PyOpenCLArrayContext(queue,
             allocator=cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue)))
 
-    dim = 2
+    dim = 1
     nel_1d = 16
     from meshmode.mesh.generation import generate_regular_rect_mesh
 
     mesh = generate_regular_rect_mesh(
-        a=(-0.5,)*dim,
-        b=(0.5,)*dim,
+        a=(-np.pi,)*dim,
+        b=(np.pi,)*dim,
         nelements_per_axis=(nel_1d,)*dim)
 
-    order = 3
+    order = 1
 
-    if dim == 2:
+    if dim == 1:
+        # no deep meaning here, just a fudge factor
+        dt = 0.1 / (nel_1d * order ** 2)
+    elif dim == 2:
         # no deep meaning here, just a fudge factor
         dt = 0.75 / (nel_1d * order ** 2)
     elif dim == 3:
@@ -94,21 +98,28 @@ def main(use_profiling=False):
 
     discr = EagerDGDiscretization(actx, mesh, order=order)
 
-    fields = flat_obj_array(
-        bump(actx, discr),
-        [discr.zeros(actx) for i in range(discr.dim)]
-        )
+    nodes = thaw(actx, discr.nodes())
 
-    vis = make_visualizer(discr)
+    def w_func(x, t):
+        return flat_obj_array(
+            actx.np.sin(x)*math.cos(t),
+            -actx.np.sin(x)*math.sin(t) + actx.np.cos(x)*math.cos(t)
+            )
+
+    fields = w_func(nodes[0], 0)
+
+    vis = make_visualizer(discr, vis_order=order)
 
     def rhs(t, w):
-        return wave_operator(discr, c=1, w=w)
+        return wave_operator_alternate(discr, c=1, w=w,
+            w_func=lambda x: w_func(x, t))
 
     t = 0
-    t_final = 3
+    t_final = 10
     istep = 0
     while t < t_final:
         fields = rk4_step(fields, t, dt, rhs)
+        fields_exact = w_func(nodes[0], t)
 
         if istep % 10 == 0:
             if use_profiling:
@@ -117,7 +128,9 @@ def main(use_profiling=False):
             vis.write_vtk_file("fld-wave-eager-%04d.vtu" % istep,
                     [
                         ("u", fields[0]),
-                        ("v", fields[1:]),
+                        ("v", fields[1]),
+                        ("u_exact", fields_exact[0]),
+                        ("v_exact", fields_exact[1]),
                         ])
 
         t += dt

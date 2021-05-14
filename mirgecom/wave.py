@@ -100,3 +100,84 @@ def wave_operator(discr, c, w):
                 )
             )
         )
+
+
+def _flux_alternate(discr, c, w_tpair):
+    u = w_tpair[0]
+    v = w_tpair[1]
+
+    actx = w_tpair.int[0].array_context
+
+    normal = thaw(actx, discr.normal(w_tpair.dd))
+
+    flux_weak = flat_obj_array(
+        -normal[0]*u.avg,
+        normal[0]*v.avg,
+        )
+
+    # upwind
+    flux_weak += flat_obj_array(
+        0.5*(u.ext-u.int),
+        0.5*(v.ext-v.int),
+        )
+
+    return discr.project(w_tpair.dd, "all_faces", c*flux_weak)
+
+
+def wave_operator_alternate(discr, c, w, w_func):
+    """Compute the RHS of the wave equation.
+
+    Parameters
+    ----------
+    discr: grudge.eager.EagerDGDiscretization
+        the discretization to use
+    c: float
+        the (constant) wave speed
+    w: numpy.ndarray
+        an object array of DOF arrays, representing the state vector
+
+    Returns
+    -------
+    numpy.ndarray
+        an object array of DOF arrays, representing the ODE RHS
+    """
+    assert discr.dim == 1
+
+    def weak_d_dx(f):
+        return discr.weak_grad(f)[0]
+
+    u = w[0]
+    v = w[1]
+
+    actx = u.array_context
+
+    nodes = thaw(actx, discr.nodes())
+
+    u_int = discr.project("vol", BTAG_ALL, u)
+    v_int = discr.project("vol", BTAG_ALL, v)
+
+    # fake periodic
+    u_exact, v_exact = w_func(nodes[0])
+    u_bc = discr.project("vol", BTAG_ALL, u_exact)
+    v_bc = discr.project("vol", BTAG_ALL, v_exact)
+
+    w_int = flat_obj_array(u_int, v_int)
+    w_ext = flat_obj_array(2*u_bc-u_int, 2*v_bc-v_int)
+
+    return (
+        discr.inverse_mass(
+            flat_obj_array(
+                c*weak_d_dx(u) + discr.mass(v),
+                -c*weak_d_dx(v)
+                )
+            +  # noqa: W504
+            discr.face_mass(
+                _flux_alternate(discr, c=c, w_tpair=interior_trace_pair(discr, w))
+                + _flux_alternate(discr, c=c,
+                    w_tpair=TracePair(BTAG_ALL, interior=w_int, exterior=w_ext))
+                + sum(
+                    _flux_alternate(discr, c=c, w_tpair=tpair)
+                    for tpair in cross_rank_trace_pairs(discr, w))
+                )
+            )
+        )
