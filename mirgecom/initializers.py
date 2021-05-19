@@ -38,6 +38,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+import math
 import numpy as np
 from pytools.obj_array import make_obj_array
 from meshmode.dof_array import thaw
@@ -857,7 +858,7 @@ class PlanarDiscontinuity:
     """
 
     def __init__(
-            self, *, dim=3, normal_dir=0, x0=0, nspecies=0,
+            self, *, dim=3, normal=None, x0=0, nspecies=0,
             temperature_left, temperature_right,
             pressure_left, pressure_right,
             velocity_left=None, velocity_right=None,
@@ -870,10 +871,10 @@ class PlanarDiscontinuity:
         ----------
         dim: int
             specifies the number of dimensions for the solution
-        normal_dir: int
-            specifies the direction (plane) the discontinuity is applied in
+        normal: np.ndarray
+            specifies the normal of the discontinuity plane; defaults to x
         x0: float
-           location of discontinuity
+           coordinate of the discontinuity along the normal direction
         nspecies: int
             specifies the number of mixture species
         pressure_left: float
@@ -897,6 +898,9 @@ class PlanarDiscontinuity:
         uc: numpy.ndarray
             convective velocity (discontinuity advection speed)
         """
+        if normal is None:
+            normal = np.zeros(shape=(dim,))
+            normal[0] = 1
         if velocity_left is None:
             velocity_left = np.zeros(shape=(dim,))
         if velocity_right is None:
@@ -912,6 +916,7 @@ class PlanarDiscontinuity:
 
         self._nspecies = nspecies
         self._dim = dim
+        self._normal = normal/math.sqrt(np.dot(normal, normal))
         self._x0 = x0
         self._sigma = sigma
         self._ul = velocity_left
@@ -923,9 +928,6 @@ class PlanarDiscontinuity:
         self._tr = temperature_right
         self._yl = species_mass_left
         self._yr = species_mass_right
-        self._xdir = normal_dir
-        if self._xdir >= self._dim:
-            self._xdir = self._dim - 1
 
     def __call__(self, x_vec, eos, *, t=0.0):
         """
@@ -948,10 +950,11 @@ class PlanarDiscontinuity:
             raise ValueError(f"Position vector has unexpected dimensionality,"
                              f" expected {self._dim}.")
 
-        x_rel = x_vec[self._xdir]
+        x_rel = np.dot(x_vec, self._normal)
         actx = x_rel.array_context
         zeros = 0*x_rel
-        x0 = zeros + self._uc[self._xdir]*t + self._x0
+        uc = np.dot(self._uc, self._normal)
+        x0 = zeros + uc*t + self._x0
 
         xtanh = 1.0/self._sigma*(x0 - x_rel)
         weight = 0.5*(1.0 - actx.np.tanh(xtanh))
