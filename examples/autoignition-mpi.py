@@ -23,6 +23,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
+import math
 import logging
 import numpy as np
 import pyopencl as cl
@@ -261,9 +262,28 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=False,
                     f" {eq_pressure=}, {eq_temperature=},"
                     f" {eq_density=}, {eq_mass_fractions=}")
 
-    get_timestep = partial(inviscid_sim_timestep, discr=discr, t=current_t,
-                           dt=current_dt, cfl=current_cfl, eos=eos,
-                           t_final=t_final, constant_cfl=constant_cfl)
+    def write_vis(step, t, state, *, dv=None, reaction_rates=None):
+        # Probably unnecessary optimizations, but *shrug*
+        if dv is None:
+            dv = eos.dependent_vars(state)
+        if reaction_rates is None:
+            reaction_rates = eos.get_production_rates(state)
+        io_fields = [
+            ("cv", state),
+            ("dv", dv),
+            ("reaction_rates", reaction_rates)
+        ]
+        return write_visfile(
+            discr, io_fields, visualizer, vizname=casename, step=step, t=t)
+
+    def get_timestep(step, t, state):
+        dt = inviscid_sim_timestep(
+            discr=discr, t=t, dt=current_dt, cfl=current_cfl, eos=eos,
+            t_final=t_final, constant_cfl=constant_cfl, state=state)
+        if not math.isfinite(dt) or dt <= 0:
+            write_vis(step, t, state)
+            raise RuntimeError(f"Invalid timestep {dt}.")
+        return dt
 
     def my_rhs(t, state):
         return (euler_operator(discr, cv=state, t=t,
@@ -290,7 +310,6 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=False,
 
         if do_viz or do_health:
             dv = eos.dependent_vars(state)
-            reaction_rates = eos.get_production_rates(state)
 
         errored = False
         if do_health:
@@ -313,14 +332,7 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=False,
                     logger.info(f"{rank=}:{health_message}")
 
         if do_viz or errored:
-            reaction_rates = eos.get_production_rates(state)
-            io_fields = [
-                ("cv", state),
-                ("dv", dv),
-                ("reaction_rates", reaction_rates)
-            ]
-            write_visfile(discr, io_fields, visualizer, vizname=casename,
-                          step=step, t=t, overwrite=True)
+            write_vis(step, t, state, dv=dv)
 
         if errored:
             raise RuntimeError("Error detected by user checkpoint, exiting.")
@@ -334,12 +346,10 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=False,
                       get_timestep=get_timestep, state=current_state,
                       t=current_t, t_final=t_final, eos=eos, dim=dim)
 
-    if not check_step(current_step, nviz):  # If final step not an output step
-        if rank == 0:                       # Then likely something went wrong
+    if not check_step(current_step, nviz):
+        if rank == 0:
             logger.info("Checkpointing final state ...")
-        my_checkpoint(current_step, t=current_t,
-                      dt=(current_t - checkpoint_t),
-                      state=current_state, force=True)
+        write_vis(current_step, current_t, current_state)
 
 
 if __name__ == "__main__":
