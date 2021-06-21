@@ -23,6 +23,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
+import sys
+import getopt
 import logging
 import numpy as np
 import pyopencl as cl
@@ -55,10 +57,7 @@ from mirgecom.eos import PyrometheusMixture
 import cantera
 import pyrometheus as pyro
 
-logger = logging.getLogger(__name__)
 
-
-@mpi_entry_point
 def main(ctx_factory=cl.create_some_context, use_leap=False):
     """Drive example."""
     cl_ctx = ctx_factory()
@@ -81,7 +80,6 @@ def main(ctx_factory=cl.create_some_context, use_leap=False):
     constant_cfl = False
     nstatus = 1
     nviz = 5
-    rank = 0
     checkpoint_t = current_t
     current_step = 0
     if use_leap:
@@ -94,9 +92,16 @@ def main(ctx_factory=cl.create_some_context, use_leap=False):
     error_state = False
     debug = False
 
-    from mpi4py import MPI
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
+    if "mpi4py.MPI" in sys.modules:
+        from mpi4py import MPI
+        comm = MPI.COMM_WORLD
+    else:
+        comm = None
+
+    if comm is None or comm.Get_rank() == 0:
+        logger = logging.getLogger(__name__)
+    else:
+        logger = None
 
     from meshmode.mesh.generation import generate_regular_rect_mesh
     generate_mesh = partial(generate_regular_rect_mesh, a=(box_ll,) * dim,
@@ -207,7 +212,7 @@ def main(ctx_factory=cl.create_some_context, use_leap=False):
     eq_pressure = cantera_soln.P
 
     # Report the expected final state to the user
-    if rank == 0:
+    if logger:
         logger.info(init_message)
         logger.info(f"Expected equilibrium state:"
                     f" {eq_pressure=}, {eq_temperature=},"
@@ -244,7 +249,7 @@ def main(ctx_factory=cl.create_some_context, use_leap=False):
         current_state = ex.state
 
     if not check_step(current_step, nviz):  # If final step not an output step
-        if rank == 0:
+        if logger:
             logger.info("Checkpointing final state ...")
         my_checkpoint(current_step, t=current_t,
                       dt=(current_t - checkpoint_t),
@@ -259,6 +264,18 @@ def main(ctx_factory=cl.create_some_context, use_leap=False):
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    main(use_leap=False)
+    use_mpi = False
+    use_leap = False
+    opts, _ = getopt.getopt(sys.argv[1:], "ml", ["mpi", "leap"])
+    for opt, arg in opts:
+        if opt in ("-m", "--mpi"):
+            use_mpi = True
+        if opt in ("-l", "--leap"):
+            use_leap = True
+    if use_mpi:
+        my_main = mpi_entry_point(main)
+    else:
+        my_main = main
+    my_main(use_leap=use_leap)
 
 # vim: foldmethod=marker
