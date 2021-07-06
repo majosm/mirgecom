@@ -61,6 +61,7 @@ from mirgecom.logging_quantities import (
     logmgr_add_many_discretization_quantities,
     logmgr_add_device_name,
     logmgr_add_device_memory_usage,
+    logmgr_set_time,
     set_sim_state
 )
 
@@ -73,7 +74,7 @@ logger = logging.getLogger(__name__)
 @mpi_entry_point
 def main(ctx_factory=cl.create_some_context, use_logmgr=False,
          use_leap=False, use_profiling=False, casename=None,
-         rst_step=None, rst_name=None):
+         start_step=0):
     """Drive example."""
     cl_ctx = ctx_factory()
 
@@ -118,11 +119,9 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=False,
         timestepper = rk4_step
 
     # Time loop control parameters
-    current_step = 0
     t_final = 1e-8
     current_cfl = 1.0
     current_dt = 1e-9
-    current_t = 0
     constant_cfl = False
 
     # i.o frequencies
@@ -135,28 +134,32 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=False,
 
     debug = False
 
-    rst_path = "restart_data/"
-    rst_pattern = (
-        rst_path + "{cname}-{step:04d}-{rank:04d}.pkl"
-    )
-    if rst_step:  # read the grid from restart data
-        rst_fname = rst_pattern.format(cname=casename, step=rst_step, rank=rank)
+    def get_rst_fname(step, rank):
+        rst_path = "restart_data/"
+        rst_pattern = rst_path + "{cname}-{step:04d}-{rank:04d}.pkl"
+        return rst_pattern.format(cname=casename, step=step, rank=rank)
 
+    if start_step > 0:
         from mirgecom.restart import read_restart_data
-        restart_data = read_restart_data(actx, rst_fname)
-        local_mesh = restart_data["local_mesh"]
-        local_nelements = local_mesh.nelements
-        global_nelements = restart_data["global_nelements"]
-        assert restart_data["nparts"] == nproc
-    else:  # generate the grid from scratch
+        restart_data = read_restart_data(actx, get_rst_fname(start_step, rank))
+        assert restart_data["num_parts"] == nproc
+    else:
+        restart_data = None
+
+    from mirgecom.restart import memoize_from_restart, RESTART_TAG
+
+    @memoize_from_restart(restart_data,
+        (RESTART_TAG("local_mesh"), RESTART_TAG("global_nelements")))
+    def get_mesh():
         from meshmode.mesh.generation import generate_regular_rect_mesh
-        box_ll = -0.005
-        box_ur = 0.005
-        generate_mesh = partial(generate_regular_rect_mesh, a=(box_ll,)*dim,
-                                b=(box_ur,) * dim, nelements_per_axis=(nel_1d,)*dim)
-        local_mesh, global_nelements = generate_and_distribute_mesh(comm,
-                                                                    generate_mesh)
-        local_nelements = local_mesh.nelements
+        return generate_and_distribute_mesh(comm,
+            lambda: generate_regular_rect_mesh(
+                a=(-0.005,)*dim,
+                b=(+0.005,)*dim,
+                nelements_per_axis=(nel_1d,)*dim))
+
+    local_mesh, global_nelements = get_mesh()
+    local_nelements = local_mesh.nelements
 
     discr = EagerDGDiscretization(
         actx, local_mesh, order=order, mpi_communicator=comm
@@ -253,13 +256,17 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=False,
     my_boundary = AdiabaticSlipBoundary()
     boundaries = {BTAG_ALL: my_boundary}
 
-    if rst_step:
-        current_t = restart_data["t"]
-        current_step = rst_step
-        current_state = restart_data["state"]
-    else:
-        # Set the current state from time 0
-        current_state = initializer(eos=eos, x_vec=nodes, t=0)
+    @memoize_from_restart(restart_data,
+        (start_step, RESTART_TAG("t"), RESTART_TAG("state")))
+    def get_initial_state(initializer, eos, nodes):
+        state = initializer(eos=eos, x_vec=nodes, t=0)
+        return start_step, 0., state
+
+    current_step, current_t, current_state = get_initial_state(
+        initializer, eos, nodes)
+
+    if logmgr:
+        logmgr_set_time(logmgr, current_step, current_t)
 
     # Inspection at physics debugging time
     if debug:
@@ -319,7 +326,6 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=False,
                       step=step, t=t, overwrite=True)
 
     def my_write_restart(state, step, t):
-        rst_fname = rst_pattern.format(cname=casename, step=step, rank=rank)
         rst_data = {
             "local_mesh": local_mesh,
             "state": state,
@@ -329,7 +335,7 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=False,
             "num_parts": nproc
         }
         from mirgecom.restart import write_restart_file
-        write_restart_file(actx, rst_data, rst_fname, comm)
+        write_restart_file(actx, rst_data, get_rst_fname(step, rank), comm)
 
     def my_health_check(dv, dt):
         health_error = False
@@ -376,7 +382,7 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=False,
         do_restart = check_step(step=step, interval=nrestart)
         do_health = check_step(step=step, interval=nhealth)
 
-        if step == rst_step:  # don't do viz or restart @ restart
+        if step == start_step:  # don't do viz or restart @ restart
             do_viz = False
             do_restart = False
 
@@ -436,6 +442,6 @@ if __name__ == "__main__":
     casename = "autoignition"
 
     main(use_profiling=use_profiling, use_logmgr=use_logging, use_leap=use_leap,
-         casename=casename)
+         casename=casename, start_step=0)
 
 # vim: foldmethod=marker

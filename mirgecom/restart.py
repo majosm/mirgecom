@@ -2,7 +2,8 @@
 
 .. autofunction:: read_restart_data
 .. autofunction:: write_restart_file
-.. autofunction:: make_fluid_state
+.. autoclass:: RESTART_TAG
+.. autofunction:: memoize_from_restart
 
 """
 
@@ -31,6 +32,7 @@ THE SOFTWARE.
 """
 
 import pickle
+from functools import wraps
 from meshmode.dof_array import array_context_for_pickling
 
 
@@ -56,3 +58,25 @@ def write_restart_file(actx, restart_data, filename, comm=None):
     with array_context_for_pickling(actx):
         with open(filename, "wb") as f:
             pickle.dump(restart_data, f)
+
+
+class RESTART_TAG:  # noqa: N801
+    def __init__(self, tag):
+        self.tag = tag
+
+
+def memoize_from_restart(restart_data, result_spec):
+    def decorator(func):
+        @wraps(func)
+        def wrapped_func(*args, **kwargs):
+            if restart_data is None:
+                return func(*args, **kwargs)
+            else:
+                return (
+                    restart_data[spec.tag]
+                    if isinstance(spec, RESTART_TAG)
+                    else spec
+                    for spec in result_spec)
+        return wrapped_func
+
+    return decorator
