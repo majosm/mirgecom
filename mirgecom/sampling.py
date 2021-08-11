@@ -31,7 +31,7 @@ from meshmode.dof_array import DOFArray, thaw
 def _get_query_map(query_point, src_nodes, src_grp, tol):
     ################################ MAIN MAPPING CODE ###################################
     dim = src_grp.dim
-    _, nnodes = src_nodes.shape
+    _, ntest_elements, nnodes = src_nodes.shape
     nnodes = 1
     ntest_elements = 1 #<-- Keep for now, comment out when batch testing
 
@@ -142,12 +142,14 @@ def _get_query_map(query_point, src_nodes, src_grp, tol):
 
     ################################ MAPPING CODE ENDS ###################################
 
-def query_eval(query_point, actx, discr, dim, mesh_grp, tol):
-    ### Find element containing query point
+def query_eval(query_point, actx, discr, dim, tol):
     nodes = thaw(actx, discr.nodes())
+
     vol_discr = discr.discr_from_dd("vol")
-    matched_elems_per_group = []
-    for igrp in range(len(mesh_grp)):
+
+    query_mapped = None
+
+    for igrp, src_grp in enumerate(vol_discr.groups):
         grp_nodes = np.stack([actx.to_numpy(nodes[i][igrp]) for i in range(dim)])
         box_ls = np.stack([coords.min(axis=1) for coords in grp_nodes])
         box_us = np.stack([coords.max(axis=1) for coords in grp_nodes])
@@ -157,19 +159,10 @@ def query_eval(query_point, actx, discr, dim, mesh_grp, tol):
         overlaps = overlaps_in_dim[0]
         for i in range(1, dim):
             overlaps = overlaps & overlaps_in_dim[i]
-        indices, = np.where(overlaps)
-        matched_elems_per_group.append(indices)
-
-    ### Transform query point to element basis, test query point further
-    test_igrp = 0
-    test_elems = matched_elems_per_group[test_igrp]
-    for test_elem in test_elems:
-        src_nodes = np.stack([
-            nodes[i][test_igrp][test_elem, :]
-            for i in range(dim)])
-        src_grp = vol_discr.groups[test_igrp]
-    
+        matched_elems, = np.where(overlaps)
+        src_nodes = np.stack([grp_nodes[i][matched_elems, :] for i in range(dim)])
         query_mapped_cand = _get_query_map(query_point, src_nodes, src_grp, tol)
+        # TODO: Figure out which candidate element actually contains the query point
+        query_mapped = query_mapped_cand[0]
 
-    query_mapped = query_mapped_cand
     return query_mapped

@@ -81,8 +81,6 @@ def main():
 
         local_mesh = mesh_dist.send_mesh_parts(mesh, part_per_element, num_parts)
 
-        mesh_grp = mesh.groups
-
         del mesh
 
     else:
@@ -113,7 +111,7 @@ def main():
     u_query = simple_poly(qx,qy,qz)
     tol = 1e-5
     
-    q_mapped = query_eval(query_point, actx, discr, dim, mesh_grp, tol)
+    q_mapped = query_eval(query_point, actx, discr, dim, tol)
 
 
 if __name__ == "__main__":
