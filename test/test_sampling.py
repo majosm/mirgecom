@@ -109,7 +109,7 @@ def main():
     qy = 4
     qz = 4
     
-    query_point = actx.from_numpy(np.array([qx, qy, qz]))
+    query_point = np.array([qx, qy, qz])
     u_query = simple_poly(qx,qy,qz)
     tol = 1e-5
     
