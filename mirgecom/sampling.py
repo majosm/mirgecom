@@ -163,6 +163,6 @@ def query_eval(query_point, actx, discr, dim, tol):
         src_nodes = np.stack([grp_nodes[i][matched_elems, :] for i in range(dim)])
         query_mapped_cand = _get_query_map(query_point, src_nodes, src_grp, tol)
         # TODO: Figure out which candidate element actually contains the query point
-        query_mapped = query_mapped_cand[0]
+        query_mapped = query_mapped_cand[:, 0]
 
     return query_mapped
