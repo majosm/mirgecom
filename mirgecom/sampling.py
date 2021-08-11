@@ -34,25 +34,25 @@ def _get_query_map(query_point, src_nodes, src_grp, tol):
     _, ntest_elements, _ = src_nodes.shape
 
     initial_guess = np.array([0.5, 0.5, 0.5])
-    src_unit_nodes = np.empty((dim, ntest_elements))
-    src_unit_nodes[:] = initial_guess.reshape(-1, 1)
+    src_unit_query_points = np.empty((dim, ntest_elements))
+    src_unit_query_points[:] = initial_guess.reshape(-1, 1)
 
     src_grp_basis_fcts = src_grp.basis_obj().functions
-    vdm = mp.vandermonde(src_grp_basis_fcts, src_grp.unit_nodes)
+    vdm = mp.vandermonde(src_grp_basis_fcts, src_grp.unit_query_points)
     inv_t_vdm = la.inv(vdm.T)
     nsrc_funcs = len(src_grp_basis_fcts)
 
-    def apply_map(unit_nodes):
-        # unit_nodes: (dim, ntest_elements)
+    def apply_map(unit_query_points):
+        # unit_query_points: (dim, ntest_elements)
 
-        # basis_at_unit_nodes
-        basis_at_unit_nodes = np.empty((nsrc_funcs, ntest_elements))
+        # basis_at_unit_query_points
+        basis_at_unit_query_points = np.empty((nsrc_funcs, ntest_elements))
 
         for i, f in enumerate(src_grp_basis_fcts):
-            basis_at_unit_nodes[i] = (
-                    f(unit_nodes).reshape(ntest_elements))
+            basis_at_unit_query_points[i] = (
+                    f(unit_query_points).reshape(ntest_elements))
 
-        intp_coeffs = np.einsum("fj,je->fe", inv_t_vdm, basis_at_unit_nodes)
+        intp_coeffs = np.einsum("fj,je->fe", inv_t_vdm, basis_at_unit_query_points)
 
         # If we're interpolating 1, we had better get 1 back.
         one_deviation = np.abs(np.sum(intp_coeffs, axis=0) - 1)
@@ -61,31 +61,31 @@ def _get_query_map(query_point, src_nodes, src_grp, tol):
         mapped = np.einsum("fe,aef->ae", intp_coeffs, src_nodes)
         return mapped
 
-    def get_map_jacobian(unit_nodes):
-        # unit_nodes: (dim, ntest_elements)
+    def get_map_jacobian(unit_query_points):
+        # unit_query_points: (dim, ntest_elements)
 
-        # basis_at_unit_nodes
-        dbasis_at_unit_nodes = np.empty(
+        # basis_at_unit_query_points
+        dbasis_at_unit_query_points = np.empty(
                 (dim, nsrc_funcs, ntest_elements))
 
         for i, df in enumerate(src_grp.basis_obj().gradients):
-            df_result = df(unit_nodes.reshape(dim, -1))
+            df_result = df(unit_query_points.reshape(dim, -1))
 
             for rst_axis, df_r in enumerate(df_result):
-                dbasis_at_unit_nodes[rst_axis, i] = (
+                dbasis_at_unit_query_points[rst_axis, i] = (
                         df_r.reshape(ntest_elements))
 
         dintp_coeffs = np.einsum(
-                "fj,rje->rfe", inv_t_vdm, dbasis_at_unit_nodes)
+                "fj,rje->rfe", inv_t_vdm, dbasis_at_unit_query_points)
 
         return np.einsum("rfe,aef->rae", dintp_coeffs, src_nodes)
 
     niter = 0
     while True:
-        resid = apply_map(src_unit_nodes) - query_point[:, np.newaxis]
+        resid = apply_map(src_unit_query_points) - query_point[:, np.newaxis]
 
-        df = get_map_jacobian(src_unit_nodes)
-        df_inv_resid = np.empty_like(src_unit_nodes)
+        df = get_map_jacobian(src_unit_query_points)
+        df_inv_resid = np.empty_like(src_unit_query_points)
 
         # For the 1D/2D accelerated versions, we'll use the normal
         # equations and Cramer's rule. If you're looking for high-end
@@ -105,7 +105,7 @@ def _get_query_map(query_point, src_nodes, src_grp, tol):
 
             det = ata[0, 0]*ata[1, 1] - ata[0, 1]*ata[1, 0]
 
-            df_inv_resid = np.empty_like(src_unit_nodes)
+            df_inv_resid = np.empty_like(src_unit_query_points)
             df_inv_resid[0] = 1/det * (ata[1, 1] * atb[0] - ata[1, 0]*atb[1])
             df_inv_resid[1] = 1/det * (-ata[0, 1] * atb[0] + ata[0, 0]*atb[1])
 
@@ -120,14 +120,12 @@ def _get_query_map(query_point, src_nodes, src_grp, tol):
                 df_inv_resid[:, e], _, _, _ = \
                         la.lstsq(df[:, :, e].T, resid[:, e])
 
-        src_unit_nodes = src_unit_nodes - df_inv_resid
+        src_unit_query_points = src_unit_query_points - df_inv_resid
 
         max_resid = np.max(np.abs(resid))
 
         if max_resid < tol:
-#             logger.debug("_find_src_unit_nodes_via_gauss_newton: done, "
-#                     "final residual: %g", max_resid)
-            return src_unit_nodes
+            return src_unit_query_points
 
         niter += 1
         if niter > 10:
