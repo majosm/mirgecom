@@ -10,6 +10,7 @@ Viscous Flux Calculation
 .. autofunction:: diffusive_heat_flux
 .. autofunction:: viscous_facial_flux
 .. autofunction:: viscous_flux_central
+.. autofunction:: viscous_flux_lfr
 
 Viscous Time Step Computation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -47,7 +48,7 @@ import numpy as np
 from grudge.trace_pair import TracePair
 from meshmode.dof_array import thaw, DOFArray
 
-from mirgecom.flux import divergence_flux_central
+from mirgecom.flux import divergence_flux_central, divergence_flux_lfr
 from mirgecom.fluid import (
     velocity_gradient,
     species_mass_fraction_gradient,
@@ -335,6 +336,29 @@ def viscous_flux_central(
     f_pair = TracePair(state_pair.dd, interior=f_int, exterior=f_ext)
 
     return divergence_flux_central(f_pair, normal)
+
+
+def viscous_flux_lfr(
+        discr, gas_model, state_pair, grad_cv_pair, grad_t_pair, mask_pair=None,
+        **kwargs):
+    """TBD"""
+    actx = state_pair.int.array_context
+
+    if mask_pair is None:
+        ones = discr.discr_from_dd(state_pair.dd).zeros(actx) + 1
+        mask_pair = TracePair(state_pair.dd, interior=ones, exterior=ones)
+
+    both_inside = mask_pair.int * mask_pair.ext
+
+    normal = thaw(actx, discr.normal(state_pair.dd))
+
+    f_int = both_inside * viscous_flux(
+        state_pair.int, grad_cv_pair.int, grad_t_pair.int)
+    f_ext = both_inside * viscous_flux(
+        state_pair.ext, grad_cv_pair.ext, grad_t_pair.ext)
+    f_pair = TracePair(state_pair.dd, interior=f_int, exterior=f_ext)
+
+    return divergence_flux_lfr(state_pair.cv, f_pair, normal, -0.05)
 
 
 def viscous_facial_flux(discr, gas_model, state_pair, grad_cv_pair, grad_t_pair,
