@@ -91,7 +91,7 @@ def ns_operator(discr, gas_model, state, boundaries, time=0.0,
                 inviscid_numerical_flux_func=inviscid_flux_rusanov,
                 gradient_numerical_flux_func=gradient_flux_central,
                 viscous_numerical_flux_func=viscous_flux_central,
-                quadrature_tag=None):
+                quadrature_tag=None, mask=None):
     r"""Compute RHS of the Navier-Stokes equations.
 
     Returns
@@ -138,9 +138,16 @@ def ns_operator(discr, gas_model, state, boundaries, time=0.0,
         raise ValueError("Navier-Stokes operator expects viscous gas model.")
 
     actx = state.array_context
+
+    if mask is None:
+        mask = discr.zeros(actx) + 1
+
     dd_base = as_dofdesc("vol")
     dd_vol = DOFDesc("vol", quadrature_tag)
     dd_faces = DOFDesc("all_faces", quadrature_tag)
+
+    mask_quad = discr.project(dd_base, dd_vol, mask)
+    mask_allfaces = discr.project(dd_vol, dd_faces, mask_quad)
 
     def interp_to_surf_quad(utpair):
         local_dd = utpair.dd
@@ -167,6 +174,11 @@ def ns_operator(discr, gas_model, state, boundaries, time=0.0,
         for tpair in interior_trace_pairs(discr, state.cv)
     ]
 
+    mask_interior_pairs = [
+        interp_to_surf_quad(tpair)
+        for tpair in interior_trace_pairs(discr, mask)
+    ]
+
     tseed_interior_pairs = None
     if state.is_mixture:
         # If this is a mixture, we need to exchange the temperature field because
@@ -186,16 +198,18 @@ def ns_operator(discr, gas_model, state, boundaries, time=0.0,
                                                         gas_model,
                                                         tseed_interior_pairs)
 
-    def gradient_flux_interior(tpair):
+    def gradient_flux_interior(tpair, mask_tpair):
         dd = tpair.dd
         normal = thaw(discr.normal(dd), actx)
-        flux = gradient_numerical_flux_func(tpair, normal)
+        both_inside = mask_tpair.int * mask_tpair.ext
+        flux = gradient_numerical_flux_func(tpair, normal) * both_inside
         return op.project(discr, dd, dd.with_dtag("all_faces"), flux)
 
     cv_flux_bnd = (
 
         # Domain boundaries
-        sum(boundaries[btag].cv_gradient_flux(
+        mask_allfaces
+        * sum(boundaries[btag].cv_gradient_flux(
             discr,
             # Make sure we get the state on the quadrature grid
             # restricted to the tag *btag*
@@ -207,12 +221,14 @@ def ns_operator(discr, gas_model, state, boundaries, time=0.0,
             for btag in boundary_states)
 
         # Interior boundaries
-        + sum(gradient_flux_interior(tpair) for tpair in cv_interior_pairs)
+        + sum(
+            gradient_flux_interior(cv_tpair, mask_tpair)
+            for cv_tpair, mask_tpair in zip(cv_interior_pairs, mask_interior_pairs))
     )
 
     # [Bassi_1997]_ eqn 15 (s = grad_q)
-    grad_cv = grad_operator(discr, dd_vol, dd_faces,
-                            quadrature_state.cv, cv_flux_bnd)
+    grad_cv = mask_quad * grad_operator(
+        discr, dd_vol, dd_faces, quadrature_state.cv, cv_flux_bnd)
 
     grad_cv_interior_pairs = [
         # Get the interior trace pairs onto the surface quadrature
@@ -233,7 +249,8 @@ def ns_operator(discr, gas_model, state, boundaries, time=0.0,
     t_flux_bnd = (
 
         # Domain boundaries
-        sum(boundaries[btag].temperature_gradient_flux(
+        mask_allfaces
+        * sum(boundaries[btag].temperature_gradient_flux(
             discr,
             # Make sure we get the state on the quadrature grid
             # restricted to the tag *btag*
@@ -244,12 +261,14 @@ def ns_operator(discr, gas_model, state, boundaries, time=0.0,
             for btag in boundary_states)
 
         # Interior boundaries
-        + sum(gradient_flux_interior(tpair) for tpair in t_interior_pairs)
+        + sum(
+            gradient_flux_interior(t_tpair, mask_tpair)
+            for t_tpair, mask_tpair in zip(t_interior_pairs, mask_interior_pairs))
     )
 
     # Fluxes in-hand, compute the gradient of temperature and mpi exchange it
-    grad_t = grad_operator(discr, dd_vol, dd_faces,
-                           quadrature_state.temperature, t_flux_bnd)
+    grad_t = mask_quad * grad_operator(
+        discr, dd_vol, dd_faces, quadrature_state.temperature, t_flux_bnd)
 
     grad_t_interior_pairs = [
         # Get the interior trace pairs onto the surface quadrature
@@ -259,10 +278,11 @@ def ns_operator(discr, gas_model, state, boundaries, time=0.0,
     ]
 
     # inviscid flux divergence-specific flux function for interior faces
-    def finv_divergence_flux_interior(state_pair):
+    def finv_divergence_flux_interior(state_pair, mask_pair):
         return inviscid_facial_flux(
             discr, gas_model=gas_model, state_pair=state_pair,
-            numerical_flux_func=inviscid_numerical_flux_func)
+            numerical_flux_func=inviscid_numerical_flux_func,
+            mask_pair=mask_pair)
 
     # inviscid part of bcs applied here
     def finv_divergence_flux_boundary(btag, boundary_state):
@@ -278,11 +298,13 @@ def ns_operator(discr, gas_model, state, boundaries, time=0.0,
         )
 
     # viscous fluxes across interior faces (including partition and periodic bnd)
-    def fvisc_divergence_flux_interior(state_pair, grad_cv_pair, grad_t_pair):
+    def fvisc_divergence_flux_interior(
+            state_pair, grad_cv_pair, grad_t_pair, mask_pair):
         return viscous_facial_flux(discr=discr, gas_model=gas_model,
                                    state_pair=state_pair, grad_cv_pair=grad_cv_pair,
                                    grad_t_pair=grad_t_pair,
-                                   numerical_flux_func=viscous_numerical_flux_func)
+                                   numerical_flux_func=viscous_numerical_flux_func,
+                                   mask_pair=mask_pair)
 
     # viscous part of bcs applied here
     def fvisc_divergence_flux_boundary(btag, boundary_state):
@@ -319,29 +341,35 @@ def ns_operator(discr, gas_model, state, boundaries, time=0.0,
         # All surface contributions from the viscous fluxes
         (
             # Domain boundary contributions for the viscous terms
-            sum(fvisc_divergence_flux_boundary(btag, boundary_states[btag])
+            mask_allfaces
+            * sum(fvisc_divergence_flux_boundary(btag, boundary_states[btag])
                 for btag in boundary_states)
 
             # Interior interface contributions for the viscous terms
             + sum(fvisc_divergence_flux_interior(state_pair,
                                                  grad_cv_pair,
-                                                 grad_t_pair)
-                  for state_pair, grad_cv_pair, grad_t_pair in zip(
+                                                 grad_t_pair,
+                                                 mask_pair)
+                  for state_pair, grad_cv_pair, grad_t_pair, mask_pair
+                  in zip(
                       interior_state_pairs, grad_cv_interior_pairs,
-                      grad_t_interior_pairs))
+                      grad_t_interior_pairs, mask_interior_pairs))
         )
 
         # All surface contributions from the inviscid fluxes
         - (
             # Domain boundary contributions for the inviscid terms
-            sum(finv_divergence_flux_boundary(btag, boundary_states[btag])
+            mask_allfaces
+            * sum(finv_divergence_flux_boundary(btag, boundary_states[btag])
                 for btag in boundary_states)
 
             # Interior interface contributions for the inviscid terms
-            + sum(finv_divergence_flux_interior(tpair)
-                  for tpair in interior_state_pairs)
+            + sum(
+                finv_divergence_flux_interior(state_pair, mask_pair)
+                for state_pair, mask_pair in zip(
+                    interior_state_pairs, mask_interior_pairs))
         )
     )
 
     # NS RHS
-    return div_operator(discr, dd_vol, dd_faces, vol_term, bnd_term)
+    return mask_quad * div_operator(discr, dd_vol, dd_faces, vol_term, bnd_term)

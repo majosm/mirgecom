@@ -83,7 +83,7 @@ def inviscid_flux(state):
                           momentum=mom_flux, species_mass=species_mass_flux)
 
 
-def inviscid_flux_rusanov(state_pair, gas_model, normal, **kwargs):
+def inviscid_flux_rusanov(state_pair, gas_model, normal, mask_pair=None, **kwargs):
     r"""High-level interface for inviscid facial flux using Rusanov numerical flux.
 
     The Rusanov inviscid numerical flux is calculated as:
@@ -99,15 +99,39 @@ def inviscid_flux_rusanov(state_pair, gas_model, normal, **kwargs):
     *local* maximum fluid wavespeed.
     """
     actx = state_pair.int.array_context
-    lam = actx.np.maximum(state_pair.int.wavespeed, state_pair.ext.wavespeed)
+
+    from grudge.trace_pair import TracePair
+    if mask_pair is None:
+        ones = 0*state_pair.int.cv.mass + 1
+        mask_pair = TracePair(state_pair.dd, interior=ones, exterior=ones)
+
+    both_inside = mask_pair.int * mask_pair.ext
+
+    masked_cv_pair = TracePair(
+        state_pair.dd,
+        interior=state_pair.int.cv,
+        exterior=(
+            both_inside * state_pair.ext.cv
+            + (1 - both_inside) * state_pair.int.cv))
+    from mirgecom.gas_model import make_fluid_state
+    masked_state_pair = TracePair(
+        state_pair.dd,
+        interior=make_fluid_state(
+            masked_cv_pair.int, gas_model, state_pair.temperature),
+        exterior=make_fluid_state(
+            masked_cv_pair.ext, gas_model, state_pair.temperature))
+
+    lam = actx.np.maximum(
+        masked_state_pair.int.wavespeed,
+        masked_state_pair.ext.wavespeed)
     from mirgecom.flux import num_flux_lfr
-    return num_flux_lfr(f_minus=inviscid_flux(state_pair.int)@normal,
-                        f_plus=inviscid_flux(state_pair.ext)@normal,
-                        q_minus=state_pair.int.cv,
-                        q_plus=state_pair.ext.cv, lam=lam)
+    return num_flux_lfr(f_minus=both_inside*inviscid_flux(state_pair.int)@normal,
+                        f_plus=both_inside*inviscid_flux(state_pair.ext)@normal,
+                        q_minus=masked_state_pair.int.cv,
+                        q_plus=masked_state_pair.ext.cv, lam=lam)
 
 
-def inviscid_flux_hll(state_pair, gas_model, normal, **kwargs):
+def inviscid_flux_hll(state_pair, gas_model, normal, mask_pair=None, **kwargs):
     r"""High-level interface for inviscid facial flux using HLL numerical flux.
 
     The Harten, Lax, van Leer approximate riemann numerical flux is calculated as:
@@ -122,6 +146,10 @@ def inviscid_flux_hll(state_pair, gas_model, normal, **kwargs):
     the inviscid fluid flux, $\hat{n}$ is the face normal, and $\lambda$ is the
     *local* maximum fluid wavespeed.
     """
+    # TODO
+    if mask_pair is not None:
+        raise NotImplementedError
+
     # calculate left/right wavespeeds
     actx = state_pair.int.array_context
     ones = 0.*state_pair.int.mass_density + 1.
@@ -166,7 +194,8 @@ def inviscid_flux_hll(state_pair, gas_model, normal, **kwargs):
 
 
 def inviscid_facial_flux(discr, gas_model, state_pair,
-                         numerical_flux_func=inviscid_flux_rusanov, local=False):
+                         numerical_flux_func=inviscid_flux_rusanov, local=False,
+                         mask_pair=None):
     r"""Return the numerical inviscid flux for the divergence operator.
 
     Different numerical fluxes may be used through the specificiation of
@@ -201,7 +230,8 @@ def inviscid_facial_flux(discr, gas_model, state_pair,
     """
     from arraycontext import thaw
     normal = thaw(discr.normal(state_pair.dd), state_pair.int.array_context)
-    num_flux = numerical_flux_func(state_pair, gas_model, normal)
+    num_flux = numerical_flux_func(
+        state_pair, gas_model, normal, mask_pair=mask_pair)
     dd = state_pair.dd
     dd_allfaces = dd.with_dtag("all_faces")
     return num_flux if local else discr.project(dd, dd_allfaces, num_flux)

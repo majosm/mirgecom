@@ -6,6 +6,7 @@ r""":mod:`mirgecom.diffusion` computes the diffusion operator.
 .. autoclass:: DiffusionBoundary
 .. autoclass:: DirichletDiffusionBoundary
 .. autoclass:: NeumannDiffusionBoundary
+.. autoclass:: InterfaceDiffusionBoundary
 """
 
 __copyright__ = """
@@ -43,13 +44,17 @@ from grudge.eager import interior_trace_pair, cross_rank_trace_pairs
 from grudge.trace_pair import TracePair
 
 
-def gradient_flux(discr, quad_tag, u_tpair):
+def gradient_flux(discr, quad_tag, u_tpair, mask_tpair=None):
     r"""Compute the numerical flux for $\nabla u$."""
     actx = u_tpair.int.array_context
 
     dd = u_tpair.dd
     dd_quad = dd.with_discr_tag(quad_tag)
     dd_allfaces_quad = dd_quad.with_dtag("all_faces")
+
+    if mask_tpair is None:
+        ones = discr.discr_from_dd(dd).zeros(actx) + 1
+        mask_tpair = TracePair(dd, interior=ones, exterior=ones)
 
     normal_quad = thaw(actx, discr.normal(dd_quad))
 
@@ -59,17 +64,23 @@ def gradient_flux(discr, quad_tag, u_tpair):
     def flux(u, normal):
         return -u * normal
 
+    both_inside_quad = to_quad(mask_tpair.int * mask_tpair.ext)
+
     return discr.project(dd_quad, dd_allfaces_quad, flux(
-        to_quad(u_tpair.avg), normal_quad))
+        to_quad(u_tpair.avg), normal_quad) * both_inside_quad)
 
 
-def diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair):
+def diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair, mask_tpair=None):
     r"""Compute the numerical flux for $\nabla \cdot (\alpha \nabla u)$."""
     actx = grad_u_tpair.int[0].array_context
 
     dd = grad_u_tpair.dd
     dd_quad = dd.with_discr_tag(quad_tag)
     dd_allfaces_quad = dd_quad.with_dtag("all_faces")
+
+    if mask_tpair is None:
+        ones = discr.discr_from_dd(dd).zeros(actx) + 1
+        mask_tpair = TracePair(dd, interior=ones, exterior=ones)
 
     normal_quad = thaw(actx, discr.normal(dd_quad))
 
@@ -79,11 +90,15 @@ def diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair):
     def flux(alpha, grad_u, normal):
         return -alpha * np.dot(grad_u, normal)
 
+    both_inside_quad = to_quad(mask_tpair.int * mask_tpair.ext)
+
     flux_tpair = TracePair(dd_quad,
-        interior=flux(
-            to_quad(alpha_tpair.int), to_quad(grad_u_tpair.int), normal_quad),
-        exterior=flux(
-            to_quad(alpha_tpair.ext), to_quad(grad_u_tpair.ext), normal_quad)
+        interior=(
+            flux(to_quad(alpha_tpair.int), to_quad(grad_u_tpair.int), normal_quad)
+            * both_inside_quad),
+        exterior=(
+            flux(to_quad(alpha_tpair.ext), to_quad(grad_u_tpair.ext), normal_quad)
+            * both_inside_quad)
         )
 
     return discr.project(dd_quad, dd_allfaces_quad, flux_tpair.avg)
@@ -204,7 +219,45 @@ class NeumannDiffusionBoundary(DiffusionBoundary):
         return discr.project(dd_quad, dd_allfaces_quad, flux_quad)
 
 
-def diffusion_operator(discr, quad_tag, alpha, boundaries, u, return_grad_u=False):
+class InterfaceDiffusionBoundary(DiffusionBoundary):
+    r"""
+    Interface boundary condition for the diffusion operator.
+
+    Prescribes external value(s) of $u$ and $\nabla u$ at the boundary.
+
+    .. automethod:: __init__
+    """
+
+    def __init__(self, u_ext, grad_u_ext, alpha_ext):
+        r"""
+        Initialize the boundary condition.
+
+        Parameters
+        ----------
+        u_ext: float or meshmode.dof_array.DOFArray
+            the external value(s) of $u$ along the boundary
+        grad_u_ext: numpy.ndarray
+            the external value(s) of $\nabla u$ along the boundary
+        """
+        self.u_ext = u_ext
+        self.grad_u_ext = grad_u_ext
+        self.alpha_ext = alpha_ext
+
+    def get_gradient_flux(self, discr, quad_tag, dd, alpha, u):  # noqa: D102
+        u_int = discr.project("vol", dd, u)
+        u_tpair = TracePair(dd, interior=u_int, exterior=self.u_ext)
+        return gradient_flux(discr, quad_tag, u_tpair)
+
+    def get_diffusion_flux(self, discr, quad_tag, dd, alpha, grad_u):  # noqa: D102
+        alpha_int = discr.project("vol", dd, alpha)
+        alpha_tpair = TracePair(dd, interior=alpha_int, exterior=self.alpha_ext)
+        grad_u_int = discr.project("vol", dd, grad_u)
+        grad_u_tpair = TracePair(dd, interior=grad_u_int, exterior=self.grad_u_ext)
+        return diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair)
+
+
+def diffusion_operator(
+        discr, quad_tag, alpha, boundaries, u, return_grad_u=False, mask=None):
     r"""
     Compute the diffusion operator.
 
@@ -239,6 +292,9 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, return_grad_u=Fals
     grad_u: numpy.ndarray
         the gradient of *u*; only returned if *return_grad_u* is True
     """
+    from arraycontext import get_container_context_recursively
+    actx = get_container_context_recursively(u)
+
     if isinstance(u, np.ndarray):
         if not isinstance(boundaries, list):
             raise TypeError("boundaries must be a list if u is an object array")
@@ -253,42 +309,56 @@ def diffusion_operator(discr, quad_tag, alpha, boundaries, u, return_grad_u=Fals
             raise TypeError(f"Unrecognized boundary type for tag {btag}. "
                 "Must be an instance of DiffusionBoundary.")
 
+    if mask is None:
+        mask = discr.zeros(actx) + 1
+
     dd_quad = DOFDesc("vol", quad_tag)
     dd_allfaces_quad = DOFDesc("all_faces", quad_tag)
 
-    grad_u = discr.inverse_mass(
+    grad_u = mask * discr.inverse_mass(
         discr.weak_grad(-u)
         -  # noqa: W504
         discr.face_mass(
             dd_allfaces_quad,
-            gradient_flux(discr, quad_tag, interior_trace_pair(discr, u))
+            gradient_flux(discr, quad_tag, interior_trace_pair(discr, u),
+                mask_tpair=interior_trace_pair(discr, mask))
+            + (
+                discr.project("vol", dd_allfaces_quad, mask)
+                * sum(
+                    bdry.get_gradient_flux(discr, quad_tag, as_dofdesc(btag),
+                        alpha, u)
+                    for btag, bdry in boundaries.items()))
             + sum(
-                bdry.get_gradient_flux(discr, quad_tag, as_dofdesc(btag), alpha, u)
-                for btag, bdry in boundaries.items())
-            + sum(
-                gradient_flux(discr, quad_tag, u_tpair)
-                for u_tpair in cross_rank_trace_pairs(discr, u))
+                gradient_flux(discr, quad_tag, u_tpair, mask_tpair=mask_tpair)
+                for u_tpair, mask_tpair in zip(
+                    cross_rank_trace_pairs(discr, u),
+                    cross_rank_trace_pairs(discr, mask)))
             )
         )
 
     alpha_quad = discr.project("vol", dd_quad, alpha)
     grad_u_quad = discr.project("vol", dd_quad, grad_u)
 
-    diff_u = discr.inverse_mass(
+    diff_u = mask * discr.inverse_mass(
         discr.weak_div(dd_quad, -alpha_quad*grad_u_quad)
         -  # noqa: W504
         discr.face_mass(
             dd_allfaces_quad,
             diffusion_flux(discr, quad_tag, interior_trace_pair(discr, alpha),
-                interior_trace_pair(discr, grad_u))
+                interior_trace_pair(discr, grad_u),
+                mask_tpair=interior_trace_pair(discr, mask))
             + sum(
-                bdry.get_diffusion_flux(discr, quad_tag, as_dofdesc(btag), alpha,
-                    grad_u) for btag, bdry in boundaries.items())
+                discr.project("vol", dd_allfaces_quad, mask)
+                * bdry.get_diffusion_flux(discr, quad_tag, as_dofdesc(btag), alpha,
+                    grad_u)
+                for btag, bdry in boundaries.items())
             + sum(
-                diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair)
-                for alpha_tpair, grad_u_tpair in zip(
+                diffusion_flux(discr, quad_tag, alpha_tpair, grad_u_tpair,
+                    mask_tpair=mask_tpair)
+                for alpha_tpair, grad_u_tpair, mask_tpair in zip(
                     cross_rank_trace_pairs(discr, alpha),
-                    cross_rank_trace_pairs(discr, grad_u)))
+                    cross_rank_trace_pairs(discr, grad_u),
+                    cross_rank_trace_pairs(discr, mask)))
             )
         )
 

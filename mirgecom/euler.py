@@ -73,7 +73,7 @@ import grudge.op as op
 
 def euler_operator(discr, state, gas_model, boundaries, time=0.0,
                    inviscid_numerical_flux_func=inviscid_flux_rusanov,
-                   quadrature_tag=None):
+                   quadrature_tag=None, mask=None):
     r"""Compute RHS of the Euler flow equations.
 
     Returns
@@ -118,9 +118,14 @@ def euler_operator(discr, state, gas_model, boundaries, time=0.0,
         Agglomerated object array of DOF arrays representing the RHS of the Euler
         flow equations.
     """
+    if mask is None:
+        mask = 0*state.cv.mass + 1
+
     dd_base = as_dofdesc("vol")
     dd_vol = DOFDesc("vol", quadrature_tag)
     dd_faces = DOFDesc("all_faces", quadrature_tag)
+
+    mask_quad = discr.project(dd_base, dd_vol, mask)
 
     def interp_to_surf_quad(utpair):
         local_dd = utpair.dd
@@ -145,6 +150,11 @@ def euler_operator(discr, state, gas_model, boundaries, time=0.0,
         # discretization (if any)
         interp_to_surf_quad(tpair)
         for tpair in interior_trace_pairs(discr, state.cv)
+    ]
+
+    mask_interior_pairs = [
+        interp_to_surf_quad(tpair)
+        for tpair in interior_trace_pairs(discr, mask)
     ]
 
     tseed_interior_pairs = None
@@ -172,7 +182,8 @@ def euler_operator(discr, state, gas_model, boundaries, time=0.0,
     inviscid_flux_bnd = (
 
         # Domain boundaries
-        sum(boundaries[btag].inviscid_divergence_flux(
+        discr.project(dd_vol, dd_faces, mask_quad)
+        * sum(boundaries[btag].inviscid_divergence_flux(
             discr,
             # Make sure we get the state on the quadrature grid
             # restricted to the tag *btag*
@@ -185,11 +196,12 @@ def euler_operator(discr, state, gas_model, boundaries, time=0.0,
 
         # Interior boundaries
         + sum(inviscid_facial_flux(discr, gas_model=gas_model, state_pair=state_pair,
-                                   numerical_flux_func=inviscid_numerical_flux_func)
-              for state_pair in interior_states)
+                                   numerical_flux_func=inviscid_numerical_flux_func,
+                                   mask_pair=mask_pair)
+              for state_pair, mask_pair in zip(interior_states, mask_interior_pairs))
     )
 
-    return -div_operator(discr, dd_vol, dd_faces,
+    return -mask_quad * div_operator(discr, dd_vol, dd_faces,
                          inviscid_flux_vol, inviscid_flux_bnd)
 
 

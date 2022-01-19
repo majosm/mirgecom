@@ -11,6 +11,7 @@ Boundary Conditions
 
 .. autoclass:: DummyBoundary
 .. autoclass:: AdiabaticSlipBoundary
+.. autoclass:: TemperatureCoupledSlipBoundary
 .. autoclass:: AdiabaticNoslipMovingBoundary
 .. autoclass:: IsothermalNoSlipBoundary
 """
@@ -202,7 +203,7 @@ class PrescribedFluidBoundary(FluidBoundary):
     def _identical_grad_cv(self, grad_cv_minus, **kwargs):
         return grad_cv_minus
 
-    def _identical_grad_temperature(self, grad_t_minus, **kwargs):
+    def _identical_grad_temperature(self, discr, btag, grad_t_minus, **kwargs):
         return grad_t_minus
 
     def _gradient_flux_for_prescribed_cv(self, discr, btag, gas_model, state_minus,
@@ -380,6 +381,7 @@ class AdiabaticSlipBoundary(PrescribedFluidBoundary):
         PrescribedFluidBoundary.__init__(
             self, boundary_state_func=self.adiabatic_slip_state,
             boundary_temperature_func=self._temperature_for_interior_state,
+            boundary_gradient_temperature_func=self.adiabatic_slip_grad_temperature,
             boundary_grad_av_func=self.adiabatic_slip_grad_av
         )
 
@@ -415,24 +417,104 @@ class AdiabaticSlipBoundary(PrescribedFluidBoundary):
         return make_fluid_state(cv=ext_cv, gas_model=gas_model,
                                 temperature_seed=state_minus.temperature)
 
+    def adiabatic_slip_grad_temperature(self, discr, btag, grad_t_minus, **kwargs):
+        """Get the exterior grad(T) on the boundary."""
+        actx = grad_t_minus[0].array_context
+        nhat = thaw(discr.normal(btag), actx)
+        # Subtract out 2*wall-normal component
+        return grad_t_minus - 2 * np.dot(grad_t_minus, nhat) * nhat
+
     def adiabatic_slip_grad_av(self, discr, btag, grad_av_minus, **kwargs):
         """Get the exterior grad(Q) on the boundary."""
         # Grab some boundary-relevant data
-        dim, = grad_av_minus.mass.shape
-        actx = grad_av_minus.mass[0].array_context
-        nhat = thaw(discr.norm(btag), actx)
+        actx = grad_av_minus[0].array_context
 
-        # Subtract 2*wall-normal component of q
-        # to enforce q=0 on the wall
-        s_mom_normcomp = np.outer(nhat,
-                                  np.dot(grad_av_minus.momentum, nhat))
-        s_mom_flux = grad_av_minus.momentum - 2*s_mom_normcomp
+        # Grab a unit normal to the boundary
+        nhat = thaw(discr.normal(btag), actx)
 
-        # flip components to set a neumann condition
-        return make_conserved(dim, mass=-grad_av_minus.mass,
-                              energy=-grad_av_minus.energy,
-                              momentum=-s_mom_flux,
-                              species_mass=-grad_av_minus.species_mass)
+        # Apply a Neumann condition on the energy gradient
+        ext_grad_energy = (
+            grad_av_minus.energy - 2 * np.dot(grad_av_minus.energy, nhat) * nhat)
+
+        return make_conserved(
+            discr.dim, mass=grad_av_minus.mass, energy=ext_grad_energy,
+            momentum=grad_av_minus.momentum, species_mass=grad_av_minus.species_mass)
+
+
+class TemperatureCoupledSlipBoundary(PrescribedFluidBoundary):
+    def __init__(self, ext_t, ext_grad_t, ext_kappa):
+        """Initialize TemperatureCoupledSlipBoundary."""
+        PrescribedFluidBoundary.__init__(
+            self,
+            boundary_state_func=self.temperature_coupled_slip_state,
+            boundary_grad_av_func=self.temperature_coupled_slip_grad_av,
+            boundary_temperature_func=lambda *args, **kwargs: ext_t,
+            boundary_gradient_temperature_func=lambda *args, **kwargs: ext_grad_t
+        )
+        self.ext_t = ext_t
+        self.ext_grad_t = ext_grad_t
+        self.ext_kappa = ext_kappa
+
+    def temperature_coupled_slip_state(
+            self, discr, btag, gas_model, state_minus, **kwargs):
+        """Get the exterior solution on the boundary."""
+        # Grab some boundary-relevant data
+        dim = discr.dim
+        actx = state_minus.array_context
+
+        # Grab a unit normal to the boundary
+        nhat = thaw(discr.normal(btag), actx)
+
+        # Subtract out the 2*wall-normal component
+        # of velocity from the velocity at the wall to
+        # induce an equal but opposite wall-normal (reflected) wave
+        # preserving the tangential component
+        cv_minus = state_minus.cv
+        ext_mom = (cv_minus.momentum
+                   - 2.0*np.dot(cv_minus.momentum, nhat)*nhat)
+
+        # Compute the energy
+        ext_internal_energy = (
+            cv_minus.mass
+            * gas_model.eos.get_internal_energy(
+                temperature=self.ext_t,
+                species_mass_fractions=cv_minus.species_mass_fractions))
+        ext_kinetic_energy = gas_model.eos.kinetic_energy(cv_minus)
+        ext_energy = ext_internal_energy + ext_kinetic_energy
+
+        # Form the external boundary solution with the new momentum and energy
+        ext_cv = make_conserved(
+            dim=dim, mass=cv_minus.mass, energy=ext_energy, momentum=ext_mom,
+            species_mass=cv_minus.species_mass)
+        t_seed = state_minus.temperature if state_minus.is_mixture else None
+
+        ext_state_without_kappa = make_fluid_state(
+            cv=ext_cv, gas_model=gas_model, temperature_seed=t_seed)
+
+        # Replace the heat conductivity values computed from the state with the
+        # prescribed external values
+        from dataclasses import replace
+        ext_tv = replace(
+            ext_state_without_kappa.tv, thermal_conductivity=self.ext_kappa)
+        ext_state = replace(ext_state_without_kappa, tv=ext_tv)
+
+        return ext_state
+
+    def temperature_coupled_slip_grad_av(self, discr, btag, grad_av_minus, **kwargs):
+        """Get the exterior grad(Q) on the boundary."""
+        # Grab some boundary-relevant data
+        actx = grad_av_minus[0].array_context
+
+        # Grab a unit normal to the boundary
+        nhat = thaw(discr.normal(btag), actx)
+
+        # Apply a Neumann condition on the energy gradient
+        ext_grad_energy = (
+            grad_av_minus.energy - 2 * np.dot(grad_av_minus.energy, nhat) * nhat)
+
+        return make_conserved(
+            discr.dim, mass=grad_av_minus.mass, energy=ext_grad_energy,
+            momentum=grad_av_minus.momentum, species_mass=grad_av_minus.species_mass)
 
 
 class AdiabaticNoslipMovingBoundary(PrescribedFluidBoundary):
@@ -447,6 +529,8 @@ class AdiabaticNoslipMovingBoundary(PrescribedFluidBoundary):
         PrescribedFluidBoundary.__init__(
             self, boundary_state_func=self.adiabatic_noslip_state,
             boundary_temperature_func=self._temperature_for_interior_state,
+            boundary_gradient_temperature_func=(
+                self.adiabatic_noslip_grad_temperature),
             boundary_grad_av_func=self.adiabatic_noslip_grad_av,
         )
         # Check wall_velocity (assumes dim is correct)
@@ -469,9 +553,28 @@ class AdiabaticNoslipMovingBoundary(PrescribedFluidBoundary):
         return make_fluid_state(cv=cv, gas_model=gas_model,
                                 temperature_seed=state_minus.temperature)
 
-    def adiabatic_noslip_grad_av(self, grad_av_minus, **kwargs):
+    def adiabatic_noslip_grad_temperature(self, discr, btag, grad_t_minus, **kwargs):
+        """Get the exterior grad(T) on the boundary."""
+        actx = grad_t_minus[0].array_context
+        nhat = thaw(discr.normal(btag), actx)
+        # Subtract out 2*wall-normal component
+        return grad_t_minus - 2 * np.dot(grad_t_minus, nhat) * nhat
+
+    def adiabatic_noslip_grad_av(self, discr, btag, grad_av_minus, **kwargs):
         """Get the exterior solution on the boundary."""
-        return(-grad_av_minus)
+        # Grab some boundary-relevant data
+        actx = grad_av_minus[0].array_context
+
+        # Grab a unit normal to the boundary
+        nhat = thaw(discr.normal(btag), actx)
+
+        # Apply a Neumann condition on the energy gradient
+        ext_grad_energy = (
+            grad_av_minus.energy - 2 * np.dot(grad_av_minus.energy, nhat) * nhat)
+
+        return make_conserved(
+            discr.dim, mass=grad_av_minus.mass, energy=ext_grad_energy,
+            momentum=grad_av_minus.momentum, species_mass=grad_av_minus.species_mass)
 
 
 class IsothermalNoSlipBoundary(PrescribedFluidBoundary):

@@ -276,7 +276,9 @@ def viscous_flux(state, grad_cv, grad_t):
             momentum=tau, species_mass=-j)
 
 
-def viscous_flux_central(discr, state_pair, grad_cv_pair, grad_t_pair, **kwargs):
+def viscous_flux_central(
+        discr, gas_model, state_pair, grad_cv_pair, grad_t_pair, mask_pair=None,
+        **kwargs):
     r"""Return a central viscous facial flux for the divergence operator.
 
     The central flux is defined as:
@@ -317,19 +319,27 @@ def viscous_flux_central(discr, state_pair, grad_cv_pair, grad_t_pair, **kwargs)
         local to the sub-discretization depending on *local* input parameter
     """
     actx = state_pair.int.array_context
+
+    if mask_pair is None:
+        ones = discr.discr_from_dd(state_pair.dd).zeros(actx) + 1
+        mask_pair = TracePair(state_pair.dd, interior=ones, exterior=ones)
+
+    both_inside = mask_pair.int * mask_pair.ext
+
     normal = thaw(actx, discr.normal(state_pair.dd))
 
-    f_int = viscous_flux(state_pair.int, grad_cv_pair.int,
-                         grad_t_pair.int)
-    f_ext = viscous_flux(state_pair.ext, grad_cv_pair.ext,
-                         grad_t_pair.ext)
+    f_int = both_inside * viscous_flux(
+        state_pair.int, grad_cv_pair.int, grad_t_pair.int)
+    f_ext = both_inside * viscous_flux(
+        state_pair.ext, grad_cv_pair.ext, grad_t_pair.ext)
     f_pair = TracePair(state_pair.dd, interior=f_int, exterior=f_ext)
 
     return divergence_flux_central(f_pair, normal)
 
 
 def viscous_facial_flux(discr, gas_model, state_pair, grad_cv_pair, grad_t_pair,
-                        numerical_flux_func=viscous_flux_central, local=False):
+                        numerical_flux_func=viscous_flux_central, mask_pair=None,
+                        local=False):
     """Return the viscous facial flux for the divergence operator.
 
     Parameters
@@ -369,7 +379,8 @@ def viscous_facial_flux(discr, gas_model, state_pair, grad_cv_pair, grad_t_pair,
     num_flux = numerical_flux_func(discr=discr, gas_model=gas_model,
                                    state_pair=state_pair,
                                    grad_cv_pair=grad_cv_pair,
-                                   grad_t_pair=grad_t_pair)
+                                   grad_t_pair=grad_t_pair,
+                                   mask_pair=mask_pair)
     dd = state_pair.dd
     dd_allfaces = dd.with_dtag("all_faces")
     return num_flux if local else discr.project(dd, dd_allfaces, num_flux)
