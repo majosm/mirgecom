@@ -66,7 +66,7 @@ from mirgecom.navierstokes import (
     grad_t_operator as fluid_grad_t_operator,
     ns_operator,
 )
-from mirgecom.artificial_viscosity import av_laplacian_operator
+# from mirgecom.artificial_viscosity import av_laplacian_operator
 from mirgecom.diffusion import (
     DiffusionBoundary,
     grad_operator as wall_grad_t_operator,
@@ -93,7 +93,10 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
             boundary_state_func=self.get_external_state,
             boundary_grad_av_func=self.get_external_grad_av,
             boundary_temperature_func=self.get_external_t,
-            boundary_gradient_temperature_func=self.get_external_grad_t
+            boundary_gradient_temperature_func=self.get_external_grad_t,
+            inviscid_flux_func=self.inviscid_wall_flux,
+            viscous_flux_func=self.viscous_wall_flux,
+            boundary_gradient_cv_func=self.get_external_grad_cv
         )
         self.ext_t = ext_t
         self.ext_grad_t = ext_grad_t
@@ -126,11 +129,10 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
         ext_kinetic_energy = gas_model.eos.kinetic_energy(cv_minus)
         ext_energy = ext_internal_energy + ext_kinetic_energy
 
-        # Form the external boundary solution with the new momentum and energy
+        # Form the external boundary solution with the new momentum and energy.
         ext_cv = make_conserved(
             dim=dim, mass=cv_minus.mass, energy=ext_energy, momentum=ext_mom,
             species_mass=cv_minus.species_mass)
-        t_seed = state_minus.temperature if state_minus.is_mixture else None
 
         def replace_thermal_conductivity(state, kappa):
             new_tv = replace(state.tv, thermal_conductivity=kappa)
@@ -138,8 +140,30 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
 
         return replace_thermal_conductivity(
             make_fluid_state(
-                cv=ext_cv, gas_model=gas_model, temperature_seed=t_seed),
+                cv=ext_cv, gas_model=gas_model,
+                temperature_seed=state_minus.temperature),
             ext_kappa)
+
+    def inviscid_wall_flux(self, discr, dd_bdry, gas_model, state_minus,
+            numerical_flux_func=inviscid_flux_rusanov, **kwargs):
+        """Return Riemann flux using state with mom opposite of interior state."""
+        dd_bdry = as_dofdesc(dd_bdry)
+        wall_cv = make_conserved(dim=state_minus.dim,
+                                 mass=state_minus.mass_density,
+                                 momentum=-state_minus.momentum_density,
+                                 energy=state_minus.energy_density,
+                                 species_mass=state_minus.species_mass_density)
+        wall_state = make_fluid_state(cv=wall_cv, gas_model=gas_model,
+                                      temperature_seed=state_minus.temperature)
+        state_pair = TracePair(dd_bdry, interior=state_minus, exterior=wall_state)
+
+        from mirgecom.inviscid import inviscid_facial_flux
+        return self._boundary_quantity(
+            discr, dd_bdry,
+            inviscid_facial_flux(discr, gas_model=gas_model, state_pair=state_pair,
+                                 numerical_flux_func=numerical_flux_func,
+                                 local=True),
+            **kwargs)
 
     # FIXME: This probably uses the wrong BC for the species mass fractions
     def get_external_grad_av(self, discr, dd_bdry, grad_av_minus, **kwargs):
@@ -150,13 +174,78 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
         # Grab a unit normal to the boundary
         nhat = thaw(discr.normal(dd_bdry), actx)
 
+        # REVIEW QUESTION
         # Apply a Neumann condition on the energy gradient
-        ext_grad_energy = (
-            grad_av_minus.energy - 2 * np.dot(grad_av_minus.energy, nhat) * nhat)
+        # This also looks suspiscous: I blv the "2" should not be there
+        # for this term.
+        ext_grad_energy = \
+            grad_av_minus.energy - 2 * np.dot(grad_av_minus.energy, nhat) * nhat
+
+        # REVIEW QUESTION
+        # uh oh - we don't have the necessary data to compute grad_y from grad_av
+        # from mirgecom.fluid import species_mass_fraction_gradient
+        # grad_y_minus = species_mass_fraction_gradient(state_minus.cv,
+        #                                               grad_cv_minus)
+        # grad_y_plus = grad_y_minus - np.outer(grad_y_minus@normal, normal)
+        # grad_species_mass_plus = 0.*grad_y_plus
+        # This re-stuffs grad_y+ back into grad_cv+, skipit; we did not split AVs
+        # for i in range(state_minus.nspecies):
+        #    grad_species_mass_plus[i] = (state_minus.mass_density*grad_y_plus[i]
+        #        + state_minus.species_mass_fractions[i]*grad_cv_minus.mass)
+        ext_grad_species_mass = \
+            grad_av_minus.species_mass - np.outer(grad_av_minus@nhat, nhat)
 
         return make_conserved(
             discr.dim, mass=grad_av_minus.mass, energy=ext_grad_energy,
-            momentum=grad_av_minus.momentum, species_mass=grad_av_minus.species_mass)
+            momentum=grad_av_minus.momentum, species_mass=ext_grad_species_mass)
+
+    def get_external_grad_cv(self, state_minus, grad_cv_minus, normal, **kwargs):
+        """Return grad(CV) to be used in the boundary calculation of viscous flux."""
+        from mirgecom.fluid import species_mass_fraction_gradient
+        grad_y_minus = species_mass_fraction_gradient(state_minus.cv, grad_cv_minus)
+        grad_y_plus = grad_y_minus - np.outer(grad_y_minus@normal, normal)
+        grad_species_mass_plus = 0.*grad_y_plus
+
+        for i in range(state_minus.nspecies):
+            grad_species_mass_plus[i] = (state_minus.mass_density*grad_y_plus[i]
+                + state_minus.species_mass_fractions[i]*grad_cv_minus.mass)
+
+        return make_conserved(grad_cv_minus.dim,
+                              mass=grad_cv_minus.mass,
+                              energy=grad_cv_minus.energy,
+                              momentum=grad_cv_minus.momentum,
+                              species_mass=grad_species_mass_plus)
+
+    def viscous_wall_flux(self, discr, dd_bdry, gas_model, state_minus,
+                                           grad_cv_minus, grad_t_minus,
+                                           numerical_flux_func=viscous_flux_central,
+                                           **kwargs):
+        """Return the boundary flux for the divergence of the viscous flux."""
+        dd_bdry = as_dofdesc(dd_bdry)
+        from mirgecom.viscous import viscous_flux
+        actx = state_minus.array_context
+        normal = thaw(discr.normal(dd_bdry), actx)
+
+        state_plus = self.get_external_state(discr=discr, dd_bdry=dd_bdry,
+                                             gas_model=gas_model,
+                                             state_minus=state_minus, **kwargs)
+        grad_cv_plus = self.get_external_grad_cv(state_minus=state_minus,
+                                                 grad_cv_minus=grad_cv_minus,
+                                                 normal=normal, **kwargs)
+
+        grad_t_plus = self.get_external_grad_t(
+            discr=discr, dd_bdry=dd_bdry, gas_model=gas_model,
+            state_minus=state_minus, grad_cv_minus=grad_cv_minus,
+            grad_t_minus=grad_t_minus)
+
+        # Note that [Mengaldo_2014]_ uses F_v(Q_bc, dQ_bc) here and
+        # *not* the numerical viscous flux as advised by [Bassi_1997]_.
+        f_ext = viscous_flux(state=state_plus, grad_cv=grad_cv_plus,
+                             grad_t=grad_t_plus)
+
+        return self._boundary_quantity(
+            discr, dd_bdry,
+            quantity=f_ext@normal)
 
     def get_external_t(self, discr, dd_bdry, gas_model, state_minus, **kwargs):
         """Get the exterior T on the boundary."""
@@ -460,10 +549,6 @@ def coupled_ns_heat_operator(
     wall_full_boundaries.update(wall_boundaries)
     wall_full_boundaries.update(wall_interface_boundaries)
 
-
-
-
-
     fluid_grad_t, wall_grad_t = coupled_grad_t_operator(
         discr,
         gas_model, wall_model,
@@ -479,35 +564,32 @@ def coupled_ns_heat_operator(
         _fluid_interface_boundaries_no_grad=fluid_interface_boundaries,
         _wall_interface_boundaries_no_grad=wall_interface_boundaries)
 
-
-
-
-
-#     fluid_rhs = 0*fluid_grad_t[0]*fluid_grad_t[1]*fluid_state.cv
+    # fluid_rhs = 0*fluid_grad_t[0]*fluid_grad_t[1]*fluid_state.cv
     fluid_rhs = 0*fluid_grad_t[0]*fluid_grad_t[1] + ns_operator(
         discr, gas_model, fluid_state, fluid_full_boundaries,
         time=time, quadrature_tag=quadrature_tag, volume_dd=fluid_volume_dd,
         operator_states_quad=fluid_operator_states_quad)
-#     fluid_rhs = ns_operator(
-#         discr, gas_model, fluid_state, fluid_full_boundaries,
-#         time=time, quadrature_tag=quadrature_tag, volume_dd=fluid_volume_dd,
-#         operator_states_quad=fluid_operator_states_quad)
+    #     fluid_rhs = ns_operator(
+    #         discr, gas_model, fluid_state, fluid_full_boundaries,
+    #         time=time, quadrature_tag=quadrature_tag, volume_dd=fluid_volume_dd,
+    #         operator_states_quad=fluid_operator_states_quad)
 
-#     if use_av:
-#         if av_kwargs is None:
-#             av_kwargs = {}
-#         fluid_rhs = fluid_rhs + (0*fluid_grad_t[0]*fluid_grad_t[1] + av_laplacian_operator(
-#             discr, fluid_full_boundaries, fluid_state, quadrature_tag=quadrature_tag,
-#             volume_dd=fluid_volume_dd, **av_kwargs))
+    #   if use_av:
+    #      if av_kwargs is None:
+    #          av_kwargs = {}
+    # fluid_rhs = fluid_rhs + (0*fluid_grad_t[0]*fluid_grad_t[1]
+    # + av_laplacian_operator(
+    #      discr, fluid_full_boundaries, fluid_state, quadrature_tag=quadrature_tag,
+    #      volume_dd=fluid_volume_dd, **av_kwargs))
 
-#     wall_rhs = 0*wall_grad_t[0]*wall_grad_t[1]*wall_temperature
+    #     wall_rhs = 0*wall_grad_t[0]*wall_grad_t[1]*wall_temperature
     wall_rhs = 0*wall_grad_t[0]*wall_grad_t[1] + wall_time_scale * _heat_operator(
         discr, wall_model, wall_full_boundaries, wall_temperature,
         penalty_amount=wall_penalty_amount, quadrature_tag=quadrature_tag,
         volume_dd=wall_volume_dd)
-#     wall_rhs = wall_time_scale * _heat_operator(
-#         discr, wall_model, wall_full_boundaries, wall_temperature,
-#         penalty_amount=wall_penalty_amount, quadrature_tag=quadrature_tag,
-#         volume_dd=wall_volume_dd)
+    #     wall_rhs = wall_time_scale * _heat_operator(
+    #         discr, wall_model, wall_full_boundaries, wall_temperature,
+    #         penalty_amount=wall_penalty_amount, quadrature_tag=quadrature_tag,
+    #         volume_dd=wall_volume_dd)
 
     return fluid_rhs, wall_rhs
