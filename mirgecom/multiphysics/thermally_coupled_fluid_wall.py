@@ -103,6 +103,9 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
         self.ext_kappa = ext_kappa
 
     # FIXME: This probably uses the wrong BC for the species mass fractions
+    # NOTE: The BC for species mass is y_+ = y_-, I think that is OK here
+    #       The BC for species mass fraction gradient is set down inside the
+    #       `viscous_flux` method.
     def get_external_state(self, discr, dd_bdry, gas_model, state_minus, **kwargs):
         """Get the exterior solution on the boundary."""
         if dd_bdry.discretization_tag is not DISCR_TAG_BASE:
@@ -148,6 +151,8 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
             numerical_flux_func=inviscid_flux_rusanov, **kwargs):
         """Return Riemann flux using state with mom opposite of interior state."""
         dd_bdry = as_dofdesc(dd_bdry)
+        # NOTE: For the inviscid/advection part we set mom_+ = -mom_-, and
+        #       use energy_+ = energy_-, per [Mengaldo_2014]_.
         wall_cv = make_conserved(dim=state_minus.dim,
                                  mass=state_minus.mass_density,
                                  momentum=-state_minus.momentum_density,
@@ -203,11 +208,11 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
         """Return grad(CV) to be used in the boundary calculation of viscous flux."""
         from mirgecom.fluid import species_mass_fraction_gradient
         grad_y_minus = species_mass_fraction_gradient(state_minus.cv, grad_cv_minus)
-        grad_y_plus = grad_y_minus - np.outer(grad_y_minus@normal, normal)
-        grad_species_mass_plus = 0.*grad_y_plus
+        grad_y_bc = grad_y_minus - np.outer(grad_y_minus@normal, normal)
+        grad_species_mass_plus = 0.*grad_y_bc
 
         for i in range(state_minus.nspecies):
-            grad_species_mass_plus[i] = (state_minus.mass_density*grad_y_plus[i]
+            grad_species_mass_plus[i] = (state_minus.mass_density*grad_y_bc[i]
                 + state_minus.species_mass_fractions[i]*grad_cv_minus.mass)
 
         return make_conserved(grad_cv_minus.dim,
@@ -226,26 +231,27 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
         actx = state_minus.array_context
         normal = thaw(discr.normal(dd_bdry), actx)
 
-        state_plus = self.get_external_state(discr=discr, dd_bdry=dd_bdry,
-                                             gas_model=gas_model,
-                                             state_minus=state_minus, **kwargs)
-        grad_cv_plus = self.get_external_grad_cv(state_minus=state_minus,
-                                                 grad_cv_minus=grad_cv_minus,
-                                                 normal=normal, **kwargs)
+        # FIXME: Need to examine [Mengaldo_2014]_ - specifically momentum terms
+        state_bc = self.get_external_state(discr=discr, dd_bdry=dd_bdry,
+                                           gas_model=gas_model,
+                                           state_minus=state_minus, **kwargs)
+        grad_cv_bc = self.get_external_grad_cv(state_minus=state_minus,
+                                               grad_cv_minus=grad_cv_minus,
+                                               normal=normal, **kwargs)
 
-        grad_t_plus = self.get_external_grad_t(
+        grad_t_bc = self.get_external_grad_t(
             discr=discr, dd_bdry=dd_bdry, gas_model=gas_model,
             state_minus=state_minus, grad_cv_minus=grad_cv_minus,
             grad_t_minus=grad_t_minus)
 
         # Note that [Mengaldo_2014]_ uses F_v(Q_bc, dQ_bc) here and
         # *not* the numerical viscous flux as advised by [Bassi_1997]_.
-        f_ext = viscous_flux(state=state_plus, grad_cv=grad_cv_plus,
-                             grad_t=grad_t_plus)
+        f_bnd = viscous_flux(state=state_bc, grad_cv=grad_cv_bc,
+                             grad_t=grad_t_bc)
 
         return self._boundary_quantity(
             discr, dd_bdry,
-            quantity=f_ext@normal)
+            quantity=f_bnd@normal)
 
     def get_external_t(self, discr, dd_bdry, gas_model, state_minus, **kwargs):
         """Get the exterior T on the boundary."""
