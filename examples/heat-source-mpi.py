@@ -27,11 +27,13 @@ import numpy as np
 import numpy.linalg as la  # noqa
 import pyopencl as cl
 
+from arraycontext import freeze, thaw
+
 from meshmode.mesh import BTAG_ALL, BTAG_NONE  # noqa
 
 from grudge.eager import EagerDGDiscretization
 from grudge.shortcuts import make_visualizer
-from grudge.dof_desc import DTAG_BOUNDARY
+from grudge.dof_desc import BoundaryDomainTag
 from mirgecom.integrators import rk4_step
 from mirgecom.diffusion import (
     diffusion_operator,
@@ -122,12 +124,11 @@ def main(actx_class, ctx_factory=cl.create_some_context, use_logmgr=True,
 
     source_width = 0.2
 
-    from arraycontext import thaw
     nodes = thaw(discr.nodes(), actx)
 
     boundaries = {
-        DTAG_BOUNDARY("dirichlet"): DirichletDiffusionBoundary(0.),
-        DTAG_BOUNDARY("neumann"): NeumannDiffusionBoundary(0.)
+        BoundaryDomainTag("dirichlet"): DirichletDiffusionBoundary(0.),
+        BoundaryDomainTag("neumann"): NeumannDiffusionBoundary(0.)
     }
 
     u = discr.zeros(actx)
@@ -172,6 +173,9 @@ def main(actx_class, ctx_factory=cl.create_some_context, use_logmgr=True,
                         ], overwrite=True)
 
         u = rk4_step(u, t, dt, compiled_rhs)
+        # Force evaluation once per timestep
+        u = thaw(freeze(u), actx)
+
         t += dt
         istep += 1
 
@@ -179,7 +183,7 @@ def main(actx_class, ctx_factory=cl.create_some_context, use_logmgr=True,
             set_dt(logmgr, dt)
             logmgr.tick_after()
     final_answer = actx.to_numpy(discr.norm(u, np.inf))
-    resid = abs(final_answer - 0.00020620711665201585)
+    resid = abs(final_answer - 0.0002062062188374177)
     if resid > 1e-15:
         raise ValueError(f"Run did not produce the expected result {resid=}")
 

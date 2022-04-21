@@ -21,7 +21,7 @@ Diagnostic utilities
 Mesh utilities
 --------------
 
-.. autofunction:: generate_and_distribute_mesh
+.. autofunction:: distribute_mesh
 
 Simulation support utilities
 ----------------------------
@@ -65,6 +65,7 @@ from meshmode.dof_array import DOFArray
 
 from typing import List
 from grudge.discretization import DiscretizationCollection
+from grudge.dof_desc import DD_VOLUME_ALL
 
 
 logger = logging.getLogger(__name__)
@@ -91,7 +92,9 @@ def check_step(step, interval):
     return False
 
 
-def get_sim_timestep(discr, state, t, dt, cfl, t_final, constant_cfl=False):
+def get_sim_timestep(
+        discr, state, t, dt, cfl, t_final, constant_cfl=False,
+        fluid_volume_dd=DD_VOLUME_ALL):
     """Return the maximum stable timestep for a typical fluid simulation.
 
     This routine returns *dt*, the users defined constant timestep, or *max_dt*, the
@@ -135,7 +138,7 @@ def get_sim_timestep(discr, state, t, dt, cfl, t_final, constant_cfl=False):
         from grudge.op import nodal_min
         mydt = state.array_context.to_numpy(
             cfl * nodal_min(
-                discr, "vol",
+                discr, fluid_volume_dd,
                 get_viscous_timestep(discr=discr, state=state)))[()]
     return min(t_remaining, mydt)
 
@@ -368,32 +371,146 @@ def generate_and_distribute_mesh(comm, generate_mesh):
     global_nelements : :class:`int`
         The number of elements in the serial mesh
     """
-    from meshmode.distributed import (
-        MPIMeshDistributor,
-        get_partition_by_pymetis,
-    )
-    num_parts = comm.Get_size()
-    mesh_dist = MPIMeshDistributor(comm)
-    global_nelements = 0
+    from warnings import warn
+    warn(
+        "generate_and_distribute_mesh is deprecated and will go away Q4 2022. "
+        "Use distribute_mesh instead.", DeprecationWarning, stacklevel=2)
+    return distribute_mesh(comm, generate_mesh)
 
-    if mesh_dist.is_mananger_rank():
 
-        mesh = generate_mesh()
+def distribute_mesh(comm, get_mesh_data):
+    # FIXME: Out of date
+    """Distribute a mesh among all ranks in *comm*.
 
-        global_nelements = mesh.nelements
+    Retrieve the global mesh data with the user-supplied function *get_mesh_data*,
+    partition the mesh, and distribute it to every rank in the provided MPI
+    communicator *comm*.
 
-        part_per_element = get_partition_by_pymetis(mesh, num_parts)
-        local_mesh = mesh_dist.send_mesh_parts(mesh, part_per_element, num_parts)
-        del mesh
+    .. note::
+        This is a collective routine and must be called by all MPI ranks.
+
+    Parameters
+    ----------
+    comm:
+        MPI communicator over which to partition the mesh
+    get_mesh_data:
+        Callable of zero arguments returning *mesh* or *(mesh, volume_to_elements)*,
+        where *mesh* is a :class:`meshmode.mesh.Mesh` and *volume_to_elements* is a
+        :class:`dict` mapping volume tags to :class:`numpy.ndarray`s of element
+        numbers.
+
+    Returns
+    -------
+    local_mesh_data : :class:`meshmode.mesh.Mesh` or :class:`dict`
+        If *get_mesh_data* returns only a mesh, *local_mesh_data* is the local mesh.
+        If *get_mesh_data* also returns *volume_to_elements*, *local_mesh_data* will
+        be a :class:`dict` mapping volume tags to corresponding local meshes.
+    global_nelements : :class:`int`
+        The number of elements in the global mesh
+    """
+    from meshmode.distributed import mpi_distribute
+
+    num_ranks = comm.Get_size()
+
+    if comm.Get_rank() == 0:
+        global_data = get_mesh_data()
+
+        from meshmode.mesh import Mesh
+        if isinstance(global_data, Mesh):
+            mesh = global_data
+            tag_to_elements = None
+            volume_to_tags = None
+        elif isinstance(global_data, tuple) and len(global_data) == 3:
+            mesh, tag_to_elements, volume_to_tags = global_data
+        else:
+            raise TypeError("Unexpected result from get_mesh_data")
+
+        from meshmode.distributed import get_partition_by_pymetis
+        from meshmode.mesh.processing import partition_mesh
+
+        if tag_to_elements is None:
+            rank_per_element = get_partition_by_pymetis(mesh, num_ranks)
+
+            rank_to_elements = {
+                rank: np.where(rank_per_element == rank)[0]
+                for rank in range(num_ranks)}
+
+            rank_to_mesh_data = partition_mesh(mesh, rank_to_elements)
+
+        else:
+            tag_to_volume = {
+                tag: vol
+                for vol, tags in volume_to_tags.items()
+                for tag in tags}
+
+            volumes = list(volume_to_tags.keys())
+
+            volume_index_per_element = np.full(mesh.nelements, -1, dtype=int)
+            for tag, elements in tag_to_elements.items():
+                volume_index_per_element[elements] = volumes.index(
+                    tag_to_volume[tag])
+
+            if np.any(volume_index_per_element < 0):
+                raise ValueError("Missing volume specification for some elements.")
+
+            rank_per_element = get_partition_by_pymetis(mesh, num_ranks)
+
+            part_id_to_elements = {
+                (rank, volumes[vol_idx]):
+                    np.where(
+                        (volume_index_per_element == vol_idx)
+                        & (rank_per_element == rank))[0]
+                for vol_idx in range(len(volumes))
+                for rank in range(num_ranks)}
+
+            # FIXME: Find a better way to do this
+            part_id_to_part_index = {
+                part_id: part_index
+                for part_id, part_index in zip(
+                    part_id_to_elements.keys(),
+                    range(len(part_id_to_elements)))}
+            from meshmode.mesh.processing import _compute_global_elem_to_part_elem
+            global_elem_to_part_elem = _compute_global_elem_to_part_elem(
+                mesh.nelements, part_id_to_elements, part_id_to_part_index,
+                mesh.element_id_dtype)
+
+            tag_to_global_to_part = {
+                tag: global_elem_to_part_elem[elements, :]
+                for tag, elements in tag_to_elements.items()}
+
+            part_id_to_tag_to_elements = {}
+            for part_id in part_id_to_elements.keys():
+                part_idx = part_id_to_part_index[part_id]
+                part_tag_to_elements = {}
+                for tag, global_to_part in tag_to_global_to_part.items():
+                    part_tag_to_elements[tag] = global_to_part[
+                        global_to_part[:, 0] == part_idx, 1]
+                part_id_to_tag_to_elements[part_id] = part_tag_to_elements
+
+            part_id_to_mesh = partition_mesh(mesh, part_id_to_elements)
+
+            rank_to_mesh_data = {
+                rank: {
+                    vol: (
+                        part_id_to_mesh[rank, vol],
+                        part_id_to_tag_to_elements[rank, vol])
+                    for vol in volumes}
+                for rank in range(num_ranks)}
+
+        local_mesh_data = mpi_distribute(
+            comm, source_rank=0, source_data=rank_to_mesh_data)
+
+        global_nelements = comm.bcast(mesh.nelements, root=0)
 
     else:
-        local_mesh = mesh_dist.receive_mesh_part()
+        local_mesh_data = mpi_distribute(comm, source_rank=0)
 
-    global_nelements = comm.bcast(global_nelements)
-    return local_mesh, global_nelements
+        global_nelements = comm.bcast(None, root=0)
+
+    return local_mesh_data, global_nelements
 
 
-def boundary_report(discr, boundaries, outfile_name):
+def boundary_report(discr, boundaries, outfile_name, volume_dd=DD_VOLUME_ALL):
     """Generate a report of the grid boundaries."""
     comm = discr.mpi_communicator
     nproc = 1
@@ -407,22 +524,23 @@ def boundary_report(discr, boundaries, outfile_name):
     local_report = StringIO(local_header)
     local_report.seek(0, 2)
 
-    for btag in boundaries:
-        boundary_discr = discr.discr_from_dd(btag)
+    for bdtag in boundaries:
+        boundary_discr = discr.discr_from_dd(bdtag)
         nnodes = sum([grp.ndofs for grp in boundary_discr.groups])
-        local_report.write(f"{btag}: {nnodes}\n")
+        local_report.write(f"{bdtag}: {nnodes}\n")
 
-    if nproc > 1:
-        from meshmode.mesh import BTAG_PARTITION
-        from grudge.trace_pair import connected_ranks
-        remote_ranks = connected_ranks(discr)
-        local_report.write(f"remote_ranks: {remote_ranks}\n")
-        rank_nodes = []
-        for remote_rank in remote_ranks:
-            boundary_discr = discr.discr_from_dd(BTAG_PARTITION(remote_rank))
-            nnodes = sum([grp.ndofs for grp in boundary_discr.groups])
-            rank_nodes.append(nnodes)
-        local_report.write(f"nnodes_pb: {rank_nodes}\n")
+    from meshmode.mesh import BTAG_PARTITION
+    from meshmode.distributed import get_connected_partitions
+    connected_part_ids = get_connected_partitions(
+        discr.discr_from_dd(volume_dd).mesh)
+    local_report.write(f"connected_part_ids: {connected_part_ids}\n")
+    part_nodes = []
+    for connected_part_id in connected_part_ids:
+        boundary_discr = discr.discr_from_dd(BTAG_PARTITION(connected_part_id))
+        nnodes = sum([grp.ndofs for grp in boundary_discr.groups])
+        part_nodes.append(nnodes)
+    if part_nodes:
+        local_report.write(f"nnodes_pb: {part_nodes}\n")
 
     local_report.write("-----\n")
     local_report.seek(0)
@@ -434,15 +552,6 @@ def boundary_report(discr, boundaries, outfile_name):
             f.close()
         if comm is not None:
             comm.barrier()
-
-
-def create_parallel_grid(comm, generate_grid):
-    """Generate and distribute mesh compatibility interface."""
-    from warnings import warn
-    warn("Do not call create_parallel_grid; use generate_and_distribute_mesh "
-         "instead. This function will disappear August 1, 2021",
-         DeprecationWarning, stacklevel=2)
-    return generate_and_distribute_mesh(comm=comm, generate_mesh=generate_grid)
 
 
 def limit_species_mass_fractions(cv):
