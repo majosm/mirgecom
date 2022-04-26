@@ -104,7 +104,6 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
         self.ext_kappa = ext_kappa
         self.ext_grad_t = ext_grad_t
 
-    # FIXME: This probably uses the wrong BC for the species mass fractions
     # NOTE: The BC for species mass is y_+ = y_-, I think that is OK here
     #       The BC for species mass fraction gradient is set down inside the
     #       `viscous_flux` method.
@@ -172,7 +171,6 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
                                  local=True),
             **kwargs)
 
-    # FIXME: This probably uses the wrong BC for the species mass fractions
     def get_external_grad_av(self, discr, dd_bdry, grad_av_minus, **kwargs):
         """Get the exterior grad(Q) on the boundary."""
         # Grab some boundary-relevant data
@@ -181,14 +179,12 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
         # Grab a unit normal to the boundary
         nhat = thaw(discr.normal(dd_bdry), actx)
 
-        # REVIEW QUESTION
         # Apply a Neumann condition on the energy gradient
-        # This also looks suspiscous: I blv the "2" should not be there
-        # for this term.
+        # Should probably compute external energy gradient using external temperature
+        # gradient, but that is a can of worms
         ext_grad_energy = \
             grad_av_minus.energy - 2 * np.dot(grad_av_minus.energy, nhat) * nhat
 
-        # REVIEW QUESTION
         # uh oh - we don't have the necessary data to compute grad_y from grad_av
         # from mirgecom.fluid import species_mass_fraction_gradient
         # grad_y_minus = species_mass_fraction_gradient(state_minus.cv,
