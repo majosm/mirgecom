@@ -549,22 +549,18 @@ def coupled_ns_heat_operator(
             gas_model, wall_model,
             fluid_volume_dd, wall_volume_dd,
             fluid_state, wall_temperature,
-            time=time,
-            fluid_gradient_numerical_flux_func=fluid_gradient_numerical_flux_func,
-            quadrature_tag=quadrature_tag,
-            _fluid_operator_states_quad=fluid_operator_states_quad,
-            _fluid_interface_boundaries_no_grad=fluid_interface_boundaries_no_grad,
-            _wall_interface_boundaries_no_grad=wall_interface_boundaries_no_grad)
+            _temperature_inter_vol_tpairs=temperature_inter_vol_tpairs,
+            _kappa_inter_vol_tpairs=kappa_inter_vol_tpairs)
 
-    fluid_full_boundaries = {}
-    fluid_full_boundaries.update(fluid_boundaries)
-    fluid_full_boundaries.update(fluid_interface_boundaries)
+    fluid_all_boundaries_no_grad = {}
+    fluid_all_boundaries_no_grad.update(fluid_boundaries)
+    fluid_all_boundaries_no_grad.update(fluid_interface_boundaries_no_grad)
 
-    wall_full_boundaries = {}
-    wall_full_boundaries.update(wall_boundaries)
-    wall_full_boundaries.update(wall_interface_boundaries)
+    fluid_operator_states_quad = make_operator_fluid_states(
+        discr, fluid_state, gas_model, fluid_all_boundaries_no_grad,
+        quadrature_tag, volume_dd=fluid_volume_dd)
 
-    fluid_grad_t, wall_grad_t = coupled_grad_t_operator(
+    fluid_grad_temperature, wall_grad_temperature = coupled_grad_t_operator(
         discr,
         gas_model, wall_model,
         fluid_volume_dd, wall_volume_dd,
