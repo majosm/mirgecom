@@ -64,7 +64,7 @@ from mirgecom.navierstokes import (
     grad_t_operator as fluid_grad_t_operator,
     ns_operator,
 )
-# from mirgecom.artificial_viscosity import av_laplacian_operator
+from mirgecom.artificial_viscosity import av_laplacian_operator
 from mirgecom.diffusion import (
     DiffusionBoundary,
     grad_operator as wall_grad_t_operator,
