@@ -12,6 +12,7 @@ Flux pair interfaces for operators
 
 .. autofunction:: gradient_flux_central
 .. autofunction:: divergence_flux_central
+.. autofunction:: gradient_flux_dissipative
 """
 
 __copyright__ = """
@@ -40,7 +41,7 @@ THE SOFTWARE.
 import numpy as np  # noqa
 
 
-def num_flux_lfr(f_minus, f_plus, q_minus, q_plus, lam, **kwargs):
+def num_flux_lfr(f_minus_normal, f_plus_normal, q_minus, q_plus, lam, **kwargs):
     r"""Compute Lax-Friedrichs/Rusanov flux after [Hesthaven_2008]_, Section 6.6.
 
     The Lax-Friedrichs/Rusanov flux is calculated as:
@@ -57,10 +58,10 @@ def num_flux_lfr(f_minus, f_plus, q_minus, q_plus, lam, **kwargs):
 
     Parameters
     ----------
-    f_minus
+    f_minus_normal
         Normal component of physical flux interior to (left of) interface
 
-    f_plus
+    f_plus_normal
         Normal component of physical flux exterior to (right of) interface
 
     q_minus
@@ -79,10 +80,10 @@ def num_flux_lfr(f_minus, f_plus, q_minus, q_plus, lam, **kwargs):
         object array of :class:`~meshmode.dof_array.DOFArray` with the
         Lax-Friedrichs/Rusanov numerical flux.
     """
-    return (f_minus + f_plus - lam*(q_plus - q_minus))/2
+    return (f_minus_normal + f_plus_normal - lam*(q_plus - q_minus))/2
 
 
-def num_flux_central(f_minus, f_plus, **kwargs):
+def num_flux_central(f_minus_normal, f_plus_normal, **kwargs):
     r"""Central low-level numerical flux.
 
     The central flux is calculated as:
@@ -92,10 +93,10 @@ def num_flux_central(f_minus, f_plus, **kwargs):
 
     Parameters
     ----------
-    f_minus
+    f_minus_normal
         Normal component of physical flux interior to (left of) interface
 
-    f_plus
+    f_plus_normal
         Normal component of physical flux exterior to (right of) interface
 
     Returns
@@ -105,10 +106,10 @@ def num_flux_central(f_minus, f_plus, **kwargs):
         object array of :class:`~meshmode.dof_array.DOFArray` with the
         central numerical flux.
     """
-    return (f_plus + f_minus)/2
+    return (f_plus_normal + f_minus_normal)/2
 
 
-def num_flux_hll(f_minus, f_plus, q_minus, q_plus, s_minus, s_plus):
+def num_flux_hll(f_minus_normal, f_plus_normal, q_minus, q_plus, s_minus, s_plus):
     r"""HLL low-level numerical flux.
 
     The Harten, Lax, van Leer approximate Riemann numerical flux is calculated as:
@@ -127,10 +128,10 @@ def num_flux_hll(f_minus, f_plus, q_minus, q_plus, s_minus, s_plus):
 
     Parameters
     ----------
-    f_minus
+    f_minus_normal
         Normal component of physical flux interior to (left of) interface
 
-    f_plus
+    f_plus_normal
         Normal component of physical flux exterior to (right of) interface
 
     q_minus
@@ -159,21 +160,23 @@ def num_flux_hll(f_minus, f_plus, q_minus, q_plus, s_minus, s_plus):
         HLL numerical flux.
     """
     actx = q_minus.array_context
-    f_star = (s_plus*f_minus - s_minus*f_plus
+    f_star = (s_plus*f_minus_normal - s_minus*f_plus_normal
               + s_plus*s_minus*(q_plus - q_minus))/(s_plus - s_minus)
 
     # choose the correct f contribution based on the wave speeds
-    f_check_minus = actx.np.greater_equal(s_minus, 0*s_minus)*(0*f_minus + 1.0)
-    f_check_plus = actx.np.less_equal(s_plus, 0*s_plus)*(0*f_minus + 1.0)
+    f_check_minus = \
+        actx.np.greater_equal(s_minus, 0*s_minus)*(0*f_minus_normal + 1.0)
+    f_check_plus = \
+        actx.np.less_equal(s_plus, 0*s_plus)*(0*f_minus_normal + 1.0)
 
     f = f_star
-    f = actx.np.where(f_check_minus, f_minus, f)
-    f = actx.np.where(f_check_plus, f_plus, f)
+    f = actx.np.where(f_check_minus, f_minus_normal, f)
+    f = actx.np.where(f_check_plus, f_plus_normal, f)
 
     return f
 
 
-def gradient_flux_central(u_tpair, normal):
+def gradient_flux_central(u_tpair, normal, beta=0):
     r"""Compute a central flux for the gradient operator.
 
     The central gradient flux, $\mathbf{h}$, of a scalar quantity $u$ is calculated
@@ -208,10 +211,49 @@ def gradient_flux_central(u_tpair, normal):
         scalar component.
     """
     from arraycontext import outer
-    return outer(u_tpair.avg, normal)
+    return outer(u_tpair.avg + beta*u_tpair.diff/2, normal)
 
 
-def divergence_flux_central(trace_pair, normal):
+def gradient_flux_dissipative(u_tpair, normal, beta):
+    r"""Compute a central flux for the gradient operator.
+
+    The dissipative central gradient flux, $\mathbf{h}$, of a scalar quantity
+    $u$ is calculated as:
+
+    .. math::
+
+        \mathbf{h}({u}^-, {u}^+; \mathbf{n}) = \frac{1}{2}
+        \left(({u}^{+}+{u}^{-}) - \beta(u^{+} - u^{-})\right)\mathbf{\hat{n}}
+
+    where ${u}^-, {u}^+$, are the scalar function values on the interior
+    and exterior of the face on which the central flux is to be calculated, and
+    $\mathbf{\hat{n}}$ is the *normal* vector. Numerical dissipation is added
+    by the solution penalized by a factor $\beta$.
+
+    *u_tpair* is the :class:`~grudge.trace_pair.TracePair` representing the scalar
+    quantities ${u}^-, {u}^+$. *u_tpair* may also represent a vector-quantity
+    :class:`~grudge.trace_pair.TracePair`, and in this case the central scalar flux
+    is computed on each component of the vector quantity as an independent scalar.
+
+    Parameters
+    ----------
+    u_tpair: :class:`~grudge.trace_pair.TracePair`
+        Trace pair for the face upon which flux calculation is to be performed
+    normal: numpy.ndarray
+        object array of :class:`~meshmode.dof_array.DOFArray` with outward-pointing
+        normals
+
+    Returns
+    -------
+    numpy.ndarray
+        object array of :class:`~meshmode.dof_array.DOFArray` with the flux for each
+        scalar component.
+    """
+    from arraycontext import outer
+    return outer(u_tpair.avg + .5*beta*u_tpair.diff, normal)
+
+
+def divergence_flux_central(trace_pair, normal, jump_term=0, beta=0):
     r"""Compute a central flux for the divergence operator.
 
     The central divergence flux, $h$, is calculated as:
@@ -239,4 +281,5 @@ def divergence_flux_central(trace_pair, normal):
         object array of :class:`~meshmode.dof_array.DOFArray` with the flux for each
         scalar component.
     """
-    return trace_pair.avg@normal
+    # return (trace_pair.avg + beta*trace_pair.diff + jump_term)@normal
+    return (trace_pair.avg + beta*trace_pair.diff/2 + jump_term)@normal

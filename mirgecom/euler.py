@@ -62,6 +62,7 @@ from mirgecom.inviscid import (
     inviscid_flux_rusanov,
     inviscid_boundary_flux_for_divergence_operator
 )
+
 from mirgecom.operators import div_operator
 
 
@@ -69,16 +70,6 @@ def euler_operator(discr, state, gas_model, boundaries, time=0.0,
                    inviscid_numerical_flux_func=inviscid_flux_rusanov,
                    quadrature_tag=None):
     r"""Compute RHS of the Euler flow equations.
-
-    Returns
-    -------
-    numpy.ndarray
-        The right-hand-side of the Euler flow equations:
-
-        .. math::
-
-            \dot{\mathbf{q}} = - \nabla\cdot\mathbf{F} +
-                (\mathbf{F}\cdot\hat{n})_{\partial\Omega}
 
     Parameters
     ----------
@@ -109,6 +100,13 @@ def euler_operator(discr, state, gas_model, boundaries, time=0.0,
     Returns
     -------
     :class:`mirgecom.fluid.ConservedVars`
+
+        The right-hand-side of the Euler flow equations:
+
+        .. math::
+
+            \dot{\mathbf{q}} = - \nabla\cdot\mathbf{F} +
+                (\mathbf{F}\cdot\hat{n})_{\partial\Omega}
     """
     dd_quad_vol = DOFDesc("vol", quadrature_tag)
     dd_quad_faces = DOFDesc("all_faces", quadrature_tag)

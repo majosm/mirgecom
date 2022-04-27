@@ -275,7 +275,7 @@ def make_fluid_state(cv, gas_model, temperature_seed=None):
     """
     dv = gas_model.eos.dependent_vars(cv, temperature_seed=temperature_seed)
     if gas_model.transport is not None:
-        tv = gas_model.transport.transport_vars(eos=gas_model.eos, cv=cv)
+        tv = gas_model.transport.transport_vars(cv=cv, dv=dv, eos=gas_model.eos)
         return ViscousFluidState(cv=cv, dv=dv, tv=tv)
     return FluidState(cv=cv, dv=dv)
 
@@ -396,8 +396,7 @@ def make_operator_fluid_states(discr, volume_state, gas_model, boundaries,
 
         When running MPI-distributed, volume state conserved quantities
         (ConservedVars), and for mixtures, temperatures will be communicated over
-        partition boundaries inside this routine. Note the use of
-        :func:`~grudge.trace_pair.interior_trace_pairs`.
+        partition boundaries inside this routine.
 
     Parameters
     ----------

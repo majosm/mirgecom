@@ -46,7 +46,8 @@ THE SOFTWARE.
 
 import numpy as np
 from grudge.trace_pair import TracePair
-from meshmode.dof_array import thaw, DOFArray
+from meshmode.dof_array import DOFArray
+from arraycontext import thaw
 
 from mirgecom.flux import divergence_flux_central
 from mirgecom.fluid import (
@@ -277,7 +278,8 @@ def viscous_flux(state, grad_cv, grad_t):
             momentum=tau, species_mass=-j)
 
 
-def viscous_flux_central(discr, state_pair, grad_cv_pair, grad_t_pair, **kwargs):
+def viscous_flux_central(discr, state_pair, grad_cv_pair, grad_t_pair,
+                         beta=0., gamma=0, **kwargs):
     r"""Return a central viscous facial flux for the divergence operator.
 
     The central flux is defined as:
@@ -285,7 +287,8 @@ def viscous_flux_central(discr, state_pair, grad_cv_pair, grad_t_pair, **kwargs)
     .. math::
 
         f_{\text{central}} = \frac{1}{2}\left(\mathbf{f}_v^+
-        + \mathbf{f}_v^-\right)\cdot\hat{\mathbf{n}},
+        + \mathbf{f}_v^-\right)\cdot\hat{\mathbf{n}}
+        + \frac{\beta}{2}\left(\mathbf{f}_v^+ - \mathbf{f}_v^-\right),
 
     with viscous fluxes ($\mathbf{f}_v$), and the outward pointing
     face normal ($\hat{\mathbf{n}}$).
@@ -318,15 +321,20 @@ def viscous_flux_central(discr, state_pair, grad_cv_pair, grad_t_pair, **kwargs)
         local to the sub-discretization depending on *local* input parameter
     """
     actx = state_pair.int.array_context
-    normal = thaw(actx, discr.normal(state_pair.dd))
+    normal = thaw(discr.normal(state_pair.dd), actx)
 
     f_int = viscous_flux(state_pair.int, grad_cv_pair.int,
                          grad_t_pair.int)
     f_ext = viscous_flux(state_pair.ext, grad_cv_pair.ext,
                          grad_t_pair.ext)
     f_pair = TracePair(state_pair.dd, interior=f_int, exterior=f_ext)
+    q_pair = TracePair(state_pair.dd, interior=state_pair.int.cv,
+                       exterior=state_pair.ext.cv)
+    from arraycontext import outer
+    jump_term = -gamma*outer(q_pair.diff, normal)/2
 
-    return divergence_flux_central(f_pair, normal)
+    return divergence_flux_central(trace_pair=f_pair, normal=normal,
+                                   jump_term=jump_term, beta=beta)
 
 
 def viscous_facial_flux(discr, gas_model, state_pair, grad_cv_pair, grad_t_pair,

@@ -246,11 +246,14 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
     # Create a Pyrometheus EOS with the Cantera soln. Pyrometheus uses Cantera and
     # generates a set of methods to calculate chemothermomechanical properties and
     # states for this particular mechanism.
-    from mirgecom.thermochemistry import make_pyrometheus_mechanism_class
-    pyrometheus_mechanism = make_pyrometheus_mechanism_class(cantera_soln)(actx.np)
-    eos = PyrometheusMixture(pyrometheus_mechanism,
-                             temperature_guess=init_temperature)
-    gas_model = GasModel(eos=eos, transport=transport_model)
+    from mirgecom.thermochemistry import get_pyrometheus_wrapper_class
+    from mirgecom.mechanisms.uiuc import Thermochemistry
+    pyrometheus_mechanism = \
+        get_pyrometheus_wrapper_class(Thermochemistry)(actx.np)
+
+    pyro_eos = PyrometheusMixture(pyrometheus_mechanism,
+                                  temperature_guess=init_temperature)
+    gas_model = GasModel(eos=pyro_eos, transport=transport_model)
 
     # }}}
 
@@ -364,9 +367,22 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
         if rank == 0:
             logger.info(status_msg)
 
-    def my_write_viz(step, t, state, dv):
-        viz_fields = [("cv", state),
+    def my_write_viz(step, t, cv, dv, ns_rhs=None, chem_rhs=None,
+                     grad_cv=None, grad_t=None, grad_v=None):
+        viz_fields = [("cv", cv),
                       ("dv", dv)]
+        if ns_rhs is not None:
+            viz_ext = [("nsrhs", ns_rhs),
+                       ("chemrhs", chem_rhs),
+                       ("grad_rho", grad_cv.mass),
+                       ("grad_e", grad_cv.energy),
+                       ("grad_mom_x", grad_cv.momentum[0]),
+                       ("grad_mom_y", grad_cv.momentum[1]),
+                       ("grad_y_1", grad_cv.species_mass[0]),
+                       ("grad_v_x", grad_v[0]),
+                       ("grad_v_y", grad_v[1]),
+                       ("grad_temperature", grad_t)]
+            viz_fields.extend(viz_ext)
         from mirgecom.simutil import write_visfile
         write_visfile(discr, viz_fields, visualizer, vizname=casename,
                       step=step, t=t, overwrite=True)
@@ -465,7 +481,18 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
                 my_write_restart(step=step, t=t, state=cv, tseed=tseed)
 
             if do_viz:
-                my_write_viz(step=step, t=t, state=cv, dv=dv)
+                from mirgecom.fluid import velocity_gradient
+                ns_rhs, grad_cv, grad_t = \
+                    ns_operator(discr, state=fluid_state, time=t,
+                                boundaries=visc_bnds, gas_model=gas_model,
+                                return_gradients=True)
+                grad_v = velocity_gradient(cv, grad_cv)
+                chem_rhs = \
+                    pyro_eos.get_species_source_terms(cv,
+                                                      fluid_state.temperature)
+                my_write_viz(step=step, t=t, cv=cv, dv=dv, ns_rhs=ns_rhs,
+                             chem_rhs=chem_rhs, grad_cv=grad_cv, grad_t=grad_t,
+                             grad_v=grad_v)
 
             dt = get_sim_timestep(discr, fluid_state, t, dt, current_cfl,
                                   t_final, constant_cfl)
@@ -475,7 +502,7 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
         except MyRuntimeError:
             if rank == 0:
                 logger.info("Errors detected; attempting graceful exit.")
-            my_write_viz(step=step, t=t, state=cv, dv=dv)
+            my_write_viz(step=step, t=t, cv=cv, dv=dv)
             my_write_restart(step=step, t=t, state=cv, tseed=tseed)
             raise
 
@@ -494,13 +521,22 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
 
         return make_obj_array([cv, fluid_state.temperature]), dt
 
+    flux_beta = .25
+    from mirgecom.viscous import viscous_flux_central
+    from mirgecom.flux import gradient_flux_central
+    grad_num_flux_func = partial(gradient_flux_central, beta=flux_beta)
+    viscous_num_flux_func = partial(viscous_flux_central, beta=-flux_beta)
+
     def my_rhs(t, state):
         cv, tseed = state
         fluid_state = make_fluid_state(cv=cv, gas_model=gas_model,
                                        temperature_seed=tseed)
         ns_rhs = ns_operator(discr, state=fluid_state, time=t,
-                             boundaries=visc_bnds, gas_model=gas_model)
-        cv_rhs = ns_rhs + eos.get_species_source_terms(cv, fluid_state.temperature)
+                             boundaries=visc_bnds, gas_model=gas_model,
+                             gradient_numerical_flux_func=grad_num_flux_func,
+                             viscous_numerical_flux_func=viscous_num_flux_func)
+        cv_rhs = ns_rhs + pyro_eos.get_species_source_terms(cv,
+                                                            fluid_state.temperature)
         return make_obj_array([cv_rhs, 0*tseed])
 
     current_dt = get_sim_timestep(discr, current_state, current_t,
@@ -523,7 +559,18 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
     final_dv = current_state.dv
     final_dt = get_sim_timestep(discr, current_state, current_t, current_dt,
                                 current_cfl, t_final, constant_cfl)
-    my_write_viz(step=current_step, t=current_t, state=current_state.cv, dv=final_dv)
+    from mirgecom.fluid import velocity_gradient
+    ns_rhs, grad_cv, grad_t = \
+        ns_operator(discr, state=current_state, time=current_t,
+                    boundaries=visc_bnds, gas_model=gas_model,
+                    return_gradients=True)
+    grad_v = velocity_gradient(current_state.cv, grad_cv)
+    chem_rhs = \
+        pyro_eos.get_species_source_terms(current_state.cv,
+                                          current_state.temperature)
+    my_write_viz(step=current_step, t=current_t, cv=current_state.cv, dv=final_dv,
+                             chem_rhs=chem_rhs, grad_cv=grad_cv, grad_t=grad_t,
+                             grad_v=grad_v)
     my_write_restart(step=current_step, t=current_t, state=current_state.cv,
                      tseed=tseed)
     my_write_status(current_step, current_t, final_dt, state=current_state,
