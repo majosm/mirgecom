@@ -3,7 +3,6 @@ mpi4py
 numpy
 pytest
 pytest-cov
-pyvisfile
 pymetis
 importlib-resources
 psutil
@@ -11,6 +10,7 @@ pyyaml
 git+https://github.com/pythological/kanren.git#egg=miniKanren
 
 # The following packages will be git cloned by emirge:
+--editable git+https://github.com/inducer/pyvisfile.git#egg=pyvisfile
 --editable git+https://github.com/inducer/pymbolic.git#egg=pymbolic
 #--editable git+https://github.com/inducer/pyopencl.git#egg=pyopencl
 --editable git+https://github.com/kaushikcfd/loopy.git#egg=loopy
