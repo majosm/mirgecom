@@ -171,9 +171,18 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
                 "Wall": ["Lower"]}
             return mesh, tag_to_elements, volume_to_tags
 
+        def partition_generator_func(mesh, tag_to_elements, num_parts):
+            assert num_parts == 2
+            rank_per_element = np.empty(mesh.nelements)
+            rank_per_element[tag_to_elements["Lower"]] = 0
+            rank_per_element[tag_to_elements["Upper"]] = 1
+            return rank_per_element
+            # from meshmode.distributed import get_partition_by_pymetis
+            # return get_partition_by_pymetis(mesh, num_parts)
+
         from mirgecom.simutil import distribute_mesh
         volume_to_local_mesh_data, global_nelements = distribute_mesh(
-            comm, get_mesh_data)
+            comm, get_mesh_data, partition_generator_func)
         volume_to_local_mesh = {
             vol: mesh
             for vol, (mesh, _) in volume_to_local_mesh_data.items()}
@@ -199,6 +208,12 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
 
     dd_vol_fluid = DOFDesc(VolumeDomainTag("Fluid"), DISCR_TAG_BASE)
     dd_vol_wall = DOFDesc(VolumeDomainTag("Wall"), DISCR_TAG_BASE)
+
+    fluid_nodes = thaw(discr.nodes(dd_vol_fluid), actx)
+    wall_nodes = thaw(discr.nodes(dd_vol_wall), actx)
+
+    fluid_ones = 0*fluid_nodes[0] + 1
+    wall_ones = 0*wall_nodes[0] + 1
 
     if use_overintegration:
         quadrature_tag = DISCR_TAG_QUAD
@@ -249,7 +264,7 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
     wall_model = WallModel(
         density=fluid_density,
         heat_capacity=50*eos.heat_capacity_cp(),
-        thermal_conductivity=10*fluid_kappa)
+        thermal_conductivity=10*fluid_kappa*wall_ones)
 
     wall_time_scale = 20
 
@@ -269,13 +284,11 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
             logmgr_set_time(logmgr, current_step, current_t)
     else:
         # Set the current state from time 0
-        fluid_ones = discr.zeros(actx, dd=dd_vol_fluid) + 1
         pressure = 4935.22/x_scale
 #         temperature = 658.7 * fluid_ones
         temperature = isothermal_wall_temp * fluid_ones
         sigma = 500/x_scale
         offset = 0
-        fluid_nodes = thaw(discr.nodes(dd_vol_fluid), actx)
         smoothing = (
             fluid_ones
             * smooth_step(actx, sigma*(fluid_nodes[1]+offset))
@@ -308,7 +321,6 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
 #                                        center=orig)
 #         current_cv = acoustic_pulse(x_vec=fluid_nodes, cv=uniform_state, eos=eos)
 
-        wall_ones = discr.zeros(actx, dd=dd_vol_wall) + 1
         current_wall_temperature = isothermal_wall_temp * wall_ones
 
     current_state = make_obj_array([current_cv, current_wall_temperature])
@@ -324,7 +336,6 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
 
     from grudge.dt_utils import characteristic_lengthscales
     wall_lengthscales = characteristic_lengthscales(actx, discr, dd=dd_vol_wall)
-    h_wall = nodal_min(discr, dd_vol_wall, wall_lengthscales)
 
     initname = "multivolume"
     eosname = eos.__class__.__name__
@@ -345,7 +356,10 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
             constant_cfl, fluid_volume_dd=dd_vol_fluid)
         if constant_cfl:
             wall_alpha = wall_time_scale * wall_model.thermal_diffusivity()
-            wall_dt = actx.to_numpy(h_wall**2 * current_cfl/wall_alpha)[()]
+            wall_dt = actx.to_numpy(
+                nodal_min(
+                    discr, dd_vol_wall,
+                    wall_lengthscales**2 * current_cfl/wall_alpha))[()]
         else:
             wall_dt = current_dt
         return min(fluid_dt, wall_dt)
@@ -368,7 +382,10 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
                     discr, dd_vol_fluid, get_viscous_cfl(
                         discr, dt, fluid_state, volume_dd=dd_vol_fluid)))
             wall_alpha = wall_time_scale * wall_model.thermal_diffusivity()
-            wall_cfl = actx.to_numpy(wall_alpha * dt/h_wall**2)
+            wall_cfl = actx.to_numpy(
+                nodal_max(
+                    discr, dd_vol_wall,
+                    wall_alpha * dt/wall_lengthscales**2))
         if rank == 0:
             logger.info(f"Step: {step}, T: {t}, DT: {dt}\n"
                         f"----- Fluid CFL: {fluid_cfl}, Wall CFL: {wall_cfl}\n"
