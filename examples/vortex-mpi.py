@@ -69,6 +69,52 @@ class MyRuntimeError(RuntimeError):
     pass
 
 
+def generate_empty_mesh():
+    from meshmode.mesh import SimplexElementGroup
+    group_cls = SimplexElementGroup
+
+    import modepy as mp
+    shape = mp.Simplex(2)
+    space = mp.space_for_shape(shape, 1)
+    unit_nodes = mp.edge_clustered_nodes_for_space(space, shape)
+
+    vertices = np.empty((2, 0), dtype=np.float64)
+    el_vertices = np.empty((0, 3), dtype=np.int32)
+
+    from meshmode.mesh.generation import make_group_from_vertices
+    grp = make_group_from_vertices(
+        vertices, el_vertices, 1,
+        group_cls=group_cls, unit_nodes=unit_nodes)
+
+    from meshmode.mesh import Mesh
+    return Mesh(vertices, [grp], is_conforming=True)
+
+
+def generate_single_element_mesh():
+    from meshmode.mesh import SimplexElementGroup
+    group_cls = SimplexElementGroup
+
+    import modepy as mp
+    shape = mp.Simplex(2)
+    space = mp.space_for_shape(shape, 1)
+    unit_nodes = mp.edge_clustered_nodes_for_space(space, shape)
+
+    vertices = np.empty((2, 3), dtype=np.float64)
+    vertices[:, 0] = [0., 0.]
+    vertices[:, 1] = [1., 0.]
+    vertices[:, 2] = [0., 1.]
+    el_vertices = np.empty((1, 3), dtype=np.int32)
+    el_vertices[0, :] = [0, 1, 2]
+
+    from meshmode.mesh.generation import make_group_from_vertices
+    grp = make_group_from_vertices(
+        vertices, el_vertices, 1,
+        group_cls=group_cls, unit_nodes=unit_nodes)
+
+    from meshmode.mesh import Mesh
+    return Mesh(vertices, [grp], is_conforming=True)
+
+
 @mpi_entry_point
 def main(actx_class, ctx_factory=cl.create_some_context, use_logmgr=True,
          use_leap=False, use_profiling=False, casename=None, lazy=False,
@@ -83,6 +129,8 @@ def main(actx_class, ctx_factory=cl.create_some_context, use_logmgr=True,
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     num_parts = comm.Get_size()
+
+    assert num_parts == 1
 
     from mirgecom.simutil import global_reduce as _global_reduce
     global_reduce = partial(_global_reduce, comm=comm)
@@ -143,11 +191,10 @@ def main(actx_class, ctx_factory=cl.create_some_context, use_logmgr=True,
         nel_1d = 16
         box_ll = -5.0
         box_ur = 5.0
-        from meshmode.mesh.generation import generate_regular_rect_mesh
-        generate_mesh = partial(generate_regular_rect_mesh, a=(box_ll,)*dim,
-                                b=(box_ur,) * dim, nelements_per_axis=(nel_1d,)*dim)
-        local_mesh, global_nelements = generate_and_distribute_mesh(comm,
-                                                                    generate_mesh)
+        local_mesh = generate_empty_mesh()
+        global_nelements = 0
+        # local_mesh = generate_single_element_mesh()
+        # global_nelements = 1
         local_nelements = local_mesh.nelements
 
     order = 3
@@ -308,27 +355,27 @@ def main(actx_class, ctx_factory=cl.create_some_context, use_logmgr=True,
             do_health = check_step(step=step, interval=nhealth)
             do_status = check_step(step=step, interval=nstatus)
 
-            if do_health:
-                exact = initializer(x_vec=nodes, eos=eos, time=t)
-                from mirgecom.simutil import compare_fluid_solutions
-                component_errors = compare_fluid_solutions(discr, cv, exact)
-                health_errors = global_reduce(
-                    my_health_check(dv.pressure, component_errors), op="lor")
-                if health_errors:
-                    if rank == 0:
-                        logger.info("Fluid solution failed health check.")
-                    raise MyRuntimeError("Failed simulation health check.")
+            # if do_health:
+            #     exact = initializer(x_vec=nodes, eos=eos, time=t)
+            #     from mirgecom.simutil import compare_fluid_solutions
+            #     component_errors = compare_fluid_solutions(discr, cv, exact)
+            #     health_errors = global_reduce(
+            #         my_health_check(dv.pressure, component_errors), op="lor")
+            #     if health_errors:
+            #         if rank == 0:
+            #             logger.info("Fluid solution failed health check.")
+            #         raise MyRuntimeError("Failed simulation health check.")
 
             if do_restart:
                 my_write_restart(step=step, t=t, state=cv)
 
-            if do_status:
-                if component_errors is None:
-                    if exact is None:
-                        exact = initializer(x_vec=nodes, eos=eos, time=t)
-                    from mirgecom.simutil import compare_fluid_solutions
-                    component_errors = compare_fluid_solutions(discr, cv, exact)
-                my_write_status(fluid_state, component_errors)
+            # if do_status:
+            #     if component_errors is None:
+            #         if exact is None:
+            #             exact = initializer(x_vec=nodes, eos=eos, time=t)
+            #         from mirgecom.simutil import compare_fluid_solutions
+            #         component_errors = compare_fluid_solutions(discr, cv, exact)
+            #     my_write_status(fluid_state, component_errors)
 
             if do_viz:
                 if exact is None:
