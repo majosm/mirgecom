@@ -6,12 +6,8 @@ Low-level interfaces
 .. autofunction:: num_flux_lfr
 .. autofunction:: num_flux_central
 .. autofunction:: num_flux_hll
-
-Flux pair interfaces for operators
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. autofunction:: gradient_flux
-.. autofunction:: divergence_flux
+.. autofunction:: num_flux_dissipative
+.. autofunction:: num_flux_dissipative_with_state
 """
 
 __copyright__ = """
@@ -147,12 +143,6 @@ def num_flux_hll(f_minus_normal, f_plus_normal, q_minus, q_plus, s_minus, s_plus
     q_plus
         Physical state on exterior of interface
 
-    q_minus
-        Physical state on interior of interface
-
-    q_plus
-        Physical state on exterior of interface
-
     s_minus: :class:`~meshmode.dof_array.DOFArray`
         Interface wave-speed parameter for interior of interface
 
@@ -182,13 +172,9 @@ def num_flux_hll(f_minus_normal, f_plus_normal, q_minus, q_plus, s_minus, s_plus
 
     return f
 
-# }}} low-level flux interfaces
 
-
-# {{{ Tracepair flux interfaces for operators
-
-
-def gradient_flux(u_tpair, normal, beta=0):
+def num_flux_dissipative(f_minus_normal, f_plus_normal, beta=0):
+    # FIXME: Docs out of date
     r"""Compute a numerical flux for the gradient operator.
 
     The dissipative central gradient flux, $\mathbf{h}$, of a scalar quantity
@@ -225,11 +211,14 @@ def gradient_flux(u_tpair, normal, beta=0):
         object array of :class:`~meshmode.dof_array.DOFArray` face-normal directed
         flux for each component of *u*.
     """
-    from arraycontext import outer
-    return outer(u_tpair.avg + .5*beta*u_tpair.diff, normal)
+    return (
+        f_minus_normal + f_plus_normal
+        + beta * (f_minus_normal - f_plus_normal))/2
 
 
-def divergence_flux(trace_pair, normal, alpha=0, beta=0):
+def num_flux_dissipative_with_state(
+        f_minus_normal, f_plus_normal, q_minus, q_plus, alpha=0, beta=0):
+    # FIXME: Docs out of date
     r"""Compute a numerical flux for the divergence operator.
 
     The divergence flux, $h$, is calculated as:
@@ -264,5 +253,9 @@ def divergence_flux(trace_pair, normal, alpha=0, beta=0):
         object array of :class:`~meshmode.dof_array.DOFArray` with the face-normal
         flux for each vector function *v*.
     """
-    return (trace_pair.avg + beta*trace_pair.diff/2 + alpha)@normal
-# }}} Tracepair interafces for operators
+    return (
+        f_minus_normal + f_plus_normal
+        + beta * (f_minus_normal - f_plus_normal)
+        + alpha * (q_minus - q_plus)) / 2
+
+# }}} low-level flux interfaces

@@ -45,11 +45,9 @@ THE SOFTWARE.
 """
 
 import numpy as np
-from grudge.trace_pair import TracePair
 from meshmode.dof_array import DOFArray
 from arraycontext import thaw
 
-from mirgecom.flux import divergence_flux
 from mirgecom.fluid import (
     velocity_gradient,
     species_mass_fraction_gradient,
@@ -279,7 +277,8 @@ def viscous_flux(state, grad_cv, grad_t):
 
 
 def viscous_facial_flux_dissipative(discr, state_pair, grad_cv_pair, grad_t_pair,
-                                    beta=0., gamma=0.):
+                                    alpha=0., beta=0.):
+    # FIXME: Update docs for alpha
     r"""Return a dissipative facial flux for the divergence operator.
 
     The flux is defined as:
@@ -332,19 +331,15 @@ def viscous_facial_flux_dissipative(discr, state_pair, grad_cv_pair, grad_t_pair
     actx = state_pair.int.array_context
     normal = thaw(discr.normal(state_pair.dd), actx)
 
-    f_int = viscous_flux(state_pair.int, grad_cv_pair.int,
-                         grad_t_pair.int)
-    f_ext = viscous_flux(state_pair.ext, grad_cv_pair.ext,
-                         grad_t_pair.ext)
-    f_pair = TracePair(state_pair.dd, interior=f_int, exterior=f_ext)
-    q_pair = TracePair(state_pair.dd, interior=state_pair.int.cv,
-                       exterior=state_pair.ext.cv)
+    f_minus_normal = viscous_flux(state_pair.int, grad_cv_pair.int,
+                         grad_t_pair.int) @ normal
+    f_plus_normal = viscous_flux(state_pair.ext, grad_cv_pair.ext,
+                         grad_t_pair.ext) @ normal
 
-    from arraycontext import outer
-    jump_term = -gamma*outer(q_pair.diff, normal)/2
-
-    return divergence_flux(trace_pair=f_pair, normal=normal,
-                           alpha=jump_term, beta=beta)
+    from mirgecom.flux import num_flux_dissipative_with_state
+    return num_flux_dissipative_with_state(
+        f_minus_normal, f_plus_normal, state_pair.int.cv, state_pair.ext.cv,
+        alpha=alpha, beta=beta)
 
 
 def viscous_facial_flux_central(discr, state_pair, grad_cv_pair, grad_t_pair):
@@ -390,13 +385,13 @@ def viscous_facial_flux_central(discr, state_pair, grad_cv_pair, grad_t_pair):
     actx = state_pair.int.array_context
     normal = thaw(discr.normal(state_pair.dd), actx)
 
-    f_int = viscous_flux(state_pair.int, grad_cv_pair.int,
-                         grad_t_pair.int)
-    f_ext = viscous_flux(state_pair.ext, grad_cv_pair.ext,
-                         grad_t_pair.ext)
-    f_pair = TracePair(state_pair.dd, interior=f_int, exterior=f_ext)
+    f_minus_normal = viscous_flux(state_pair.int, grad_cv_pair.int,
+                         grad_t_pair.int) @ normal
+    f_plus_normal = viscous_flux(state_pair.ext, grad_cv_pair.ext,
+                         grad_t_pair.ext) @ normal
 
-    return divergence_flux(trace_pair=f_pair, normal=normal)
+    from mirgecom.flux import num_flux_central
+    return num_flux_central(f_minus_normal, f_plus_normal)
 
 
 def viscous_flux_on_element_boundary(
