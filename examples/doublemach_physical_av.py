@@ -283,10 +283,10 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
         current_cv = initializer(nodes)
     smoothness = smoothness_indicator(discr, current_cv.mass,
                                       kappa=kappa, s0=s0)
-    current_state = make_fluid_state(cv=current_cv, gas_model=gas_model,
-                                     smoothness=smoothness)
+    current_state = create_fluid_state(cv=current_cv, smoothness=smoothness)
     force_evaluation(actx, current_state)
 
+    # Can this be replaced with project_fluid_state?
     def _boundary_state(discr, btag, gas_model, state_minus, **kwargs):
         actx = state_minus.array_context
         bnd_discr = discr.discr_from_dd(btag)
@@ -294,7 +294,7 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
         return make_fluid_state(cv=initializer(x_vec=nodes, eos=gas_model.eos,
                                                **kwargs),
                                 gas_model=gas_model,
-                                smoothness=state_minus.dv.smoothness)
+                                smoothness=state_minus.xv.smoothness)
 
     flow_boundary = PrescribedFluidBoundary(
         boundary_state_func=_boundary_state)

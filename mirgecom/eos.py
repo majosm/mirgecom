@@ -75,13 +75,11 @@ class GasDependentVars:
     .. attribute:: temperature
     .. attribute:: pressure
     .. attribute:: speed_of_sound
-    .. attribute:: smoothness
     """
 
     temperature: DOFArray
     pressure: DOFArray
     speed_of_sound: DOFArray
-    smoothness: DOFArray
 
 
 @dataclass_array_container
@@ -170,8 +168,7 @@ class GasEOS(metaclass=ABCMeta):
 
     def dependent_vars(
             self, cv: ConservedVars,
-            temperature_seed: Optional[DOFArray] = None,
-            smoothness: Optional[DOFArray] = None) -> GasDependentVars:
+            temperature_seed: Optional[DOFArray] = None) -> GasDependentVars:
         """Get an agglomerated array of the dependent variables.
 
         Certain implementations of :class:`GasEOS` (e.g. :class:`MixtureEOS`)
@@ -183,7 +180,6 @@ class GasEOS(metaclass=ABCMeta):
             temperature=temperature,
             pressure=self.pressure(cv, temperature),
             speed_of_sound=self.sound_speed(cv, temperature),
-            smoothness=smoothness
         )
 
 
@@ -234,8 +230,7 @@ class MixtureEOS(GasEOS):
 
     def dependent_vars(
             self, cv: ConservedVars,
-            temperature_seed: Optional[DOFArray] = None,
-            smoothness: Optional[DOFArray] = None) -> MixtureDependentVars:
+            temperature_seed: Optional[DOFArray] = None) -> MixtureDependentVars:
         """Get an agglomerated array of the dependent variables.
 
         Certain implementations of :class:`GasEOS` (e.g. :class:`MixtureEOS`)
@@ -248,7 +243,6 @@ class MixtureEOS(GasEOS):
             pressure=self.pressure(cv, temperature),
             speed_of_sound=self.sound_speed(cv, temperature),
             species_enthalpies=self.species_enthalpies(cv, temperature),
-            smoothness=smoothness
         )
 
 

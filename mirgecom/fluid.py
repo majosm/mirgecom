@@ -37,6 +37,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 import numpy as np  # noqa
+from typing import Optional
 from meshmode.dof_array import DOFArray  # noqa
 from dataclasses import dataclass, fields
 from arraycontext import (
@@ -346,6 +347,17 @@ def make_conserved(dim, mass=None, energy=None, momentum=None, species_mass=None
         dim, _join_conserved(dim, mass=mass, energy=energy,
                              momentum=momentum, species_mass=species_mass)
     )
+
+
+@dataclass(frozen=True)
+class ExtraVars:
+    r"""Extra fluid variables that don't belong in cv/dv/tv.
+
+    .. attribute:: smoothness
+
+        The smoothness field.
+    """
+    smoothness: Optional[DOFArray] = None
 
 
 def velocity_gradient(cv, grad_cv):

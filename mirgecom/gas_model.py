@@ -48,7 +48,7 @@ from functools import partial
 from meshmode.dof_array import DOFArray  # noqa
 from dataclasses import dataclass
 from arraycontext import dataclass_array_container
-from mirgecom.fluid import ConservedVars
+from mirgecom.fluid import ConservedVars, ExtraVars
 from mirgecom.eos import (
     GasEOS,
     GasDependentVars,
@@ -99,6 +99,10 @@ class FluidState:
         Fluid state-dependent quantities corresponding to the chosen equation of
         state.
 
+    .. attribute:: xv
+
+        Extra fluid state-dependent quantities not related to EOS or transport.
+
     .. autoattribute:: array_context
     .. autoattribute:: dim
     .. autoattribute:: nspecies
@@ -119,6 +123,7 @@ class FluidState:
 
     cv: ConservedVars
     dv: GasDependentVars
+    xv: ExtraVars
 
     @property
     def array_context(self):
@@ -148,7 +153,7 @@ class FluidState:
     @property
     def smoothness(self):
         """Return the smoothness field."""
-        return self.dv.smoothness
+        return self.xv.smoothness
 
     @property
     def mass_density(self):
@@ -280,12 +285,13 @@ def make_fluid_state(cv, gas_model, temperature_seed=None, smoothness=None):
 
         Thermally consistent fluid state
     """
-    dv = gas_model.eos.dependent_vars(cv, temperature_seed=temperature_seed,
-                                      smoothness=smoothness)
+    dv = gas_model.eos.dependent_vars(cv, temperature_seed=temperature_seed)
+    xv = ExtraVars(smoothness=smoothness)
     if gas_model.transport is not None:
-        tv = gas_model.transport.transport_vars(cv=cv, dv=dv, eos=gas_model.eos)
-        return ViscousFluidState(cv=cv, dv=dv, tv=tv)
-    return FluidState(cv=cv, dv=dv)
+        tv = gas_model.transport.transport_vars(
+            cv=cv, dv=dv, xv=xv, eos=gas_model.eos)
+        return ViscousFluidState(cv=cv, dv=dv, xv=xv, tv=tv)
+    return FluidState(cv=cv, dv=dv, xv=xv)
 
 
 def project_fluid_state(discr, src, tgt, state, gas_model):
@@ -332,8 +338,8 @@ def project_fluid_state(discr, src, tgt, state, gas_model):
         temperature_seed = op.project(discr, src, tgt, state.dv.temperature)
 
     smoothness = None
-    if state.dv.smoothness is not None:
-        smoothness = op.project(discr, src, tgt, state.dv.smoothness)
+    if state.xv.smoothness is not None:
+        smoothness = op.project(discr, src, tgt, state.xv.smoothness)
 
     return make_fluid_state(cv=cv_sd, gas_model=gas_model,
                             temperature_seed=temperature_seed, smoothness=smoothness)
