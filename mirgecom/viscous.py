@@ -44,6 +44,7 @@ THE SOFTWARE.
 """
 
 import numpy as np
+from grudge.trace_pair import TracePair
 from meshmode.dof_array import DOFArray
 from meshmode.discretization.connection import FACE_RESTR_ALL
 from grudge.dof_desc import (
@@ -332,10 +333,29 @@ def viscous_facial_flux_central(dcoll, state_pair, grad_cv_pair, grad_t_pair,
     actx = state_pair.int.array_context
     normal = actx.thaw(dcoll.normal(state_pair.dd))
 
-    f_int = viscous_flux(state_pair.int, grad_cv_pair.int,
-                         grad_t_pair.int)
-    f_ext = viscous_flux(state_pair.ext, grad_cv_pair.ext,
-                         grad_t_pair.ext)
+    def harmonic_mean(x, y):
+        x_plus_y = actx.np.where(actx.np.greater(x + y, 0*x), x + y, 0*x+1)
+        return 2*x*y/x_plus_y
+
+    # TODO: Do this for other coefficients too?
+    def replace_coefs(state, *, kappa):
+        from dataclasses import replace
+        new_tv = replace(state.tv, thermal_conductivity=kappa)
+        return replace(state, tv=new_tv)
+
+    kappa_harmonic_mean = harmonic_mean(
+        state_pair.int.tv.thermal_conductivity,
+        state_pair.ext.tv.thermal_conductivity)
+
+    state_pair_with_harmonic_mean_coefs = TracePair(
+        state_pair.dd,
+        interior=replace_coefs(state_pair.int, kappa=kappa_harmonic_mean),
+        exterior=replace_coefs(state_pair.ext, kappa=kappa_harmonic_mean))
+
+    f_int = viscous_flux(
+        state_pair_with_harmonic_mean_coefs.int, grad_cv_pair.int, grad_t_pair.int)
+    f_ext = viscous_flux(
+        state_pair_with_harmonic_mean_coefs.ext, grad_cv_pair.ext, grad_t_pair.ext)
 
     return num_flux_central(f_int, f_ext)@normal
 
