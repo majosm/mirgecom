@@ -56,10 +56,11 @@ class WallModel:
         The thermal conductivity of the material.
     """
 
-    density: Union[float, DOFArray]
+    # FIXME
+    # density: Union[float, DOFArray]
     heat_capacity: Union[float, DOFArray]
-    thermal_conductivity: Union[float, DOFArray]
+    # thermal_conductivity: Union[float, DOFArray]
 
-    def thermal_diffusivity(self):
+    def thermal_diffusivity(self, density, kappa):
         """Compute the thermal diffusivity of the material."""
-        return self.thermal_conductivity/(self.density * self.heat_capacity)
+        return kappa/(density * self.heat_capacity)

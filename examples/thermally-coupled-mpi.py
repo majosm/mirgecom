@@ -254,10 +254,11 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
     fluid_pressure = 4935.22/x_scale
     fluid_temperature = 300
     fluid_density = fluid_pressure/fluid_temperature/r
+    # FIXME
     wall_model = WallModel(
-        density=fluid_density,
-        heat_capacity=50*eos.heat_capacity_cp(),
-        thermal_conductivity=10*fluid_kappa*wall_ones)
+        heat_capacity=50*eos.heat_capacity_cp())
+    wall_density = fluid_density
+    wall_kappa = 10*fluid_kappa*wall_ones
 
     wall_time_scale = 20
 
@@ -333,7 +334,9 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
             dcoll, fluid_state, t, current_dt, current_cfl, t_final,
             constant_cfl, fluid_dd=dd_vol_fluid)
         if constant_cfl:
-            wall_alpha = wall_time_scale * wall_model.thermal_diffusivity()
+            wall_alpha = (
+                wall_time_scale
+                * wall_model.thermal_diffusivity(wall_density, wall_kappa))
             wall_dt = actx.to_numpy(
                 nodal_min(
                     dcoll, dd_vol_wall,
@@ -359,7 +362,9 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
                 nodal_max(
                     dcoll, dd_vol_fluid, get_viscous_cfl(
                         dcoll, dt, fluid_state, dd=dd_vol_fluid)))
-            wall_alpha = wall_time_scale * wall_model.thermal_diffusivity()
+            wall_alpha = (
+                wall_time_scale
+                * wall_model.thermal_diffusivity(wall_density, wall_kappa))
             wall_cfl = actx.to_numpy(
                 nodal_max(
                     dcoll, dd_vol_wall,
@@ -381,6 +386,7 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
             dd_vol_fluid, dd_vol_wall,
             fluid_boundaries, wall_boundaries,
             fluid_state, wall_temperature,
+            wall_kappa,
             time=t,
             quadrature_tag=quadrature_tag)
         return make_obj_array([fluid_grad_t, wall_grad_t])
@@ -411,7 +417,7 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
             ("temperature", wall_temperature),
             ("grad_t", wall_grad_temperature),
             ("rhs", rhs[1]),
-            ("kappa", wall_model.thermal_conductivity),
+            ("kappa", wall_kappa),
         ]
         from mirgecom.simutil import write_visfile
         write_visfile(
@@ -524,6 +530,7 @@ def main(ctx_factory=cl.create_some_context, use_logmgr=True,
             dd_vol_fluid, dd_vol_wall,
             fluid_boundaries, wall_boundaries,
             fluid_state, wall_temperature,
+            wall_density, wall_kappa,
             time=t, wall_time_scale=wall_time_scale, quadrature_tag=quadrature_tag)
         from dataclasses import replace
         fluid_rhs = replace(

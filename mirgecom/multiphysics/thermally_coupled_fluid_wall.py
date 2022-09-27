@@ -388,10 +388,12 @@ def _kappa_inter_volume_trace_pairs(
         dcoll,
         gas_model, wall_model,
         fluid_dd, wall_dd,
-        fluid_state, wall_temperature):
+        fluid_state, wall_temperature,
+        # FIXME: Create a state object for the wall
+        wall_kappa):
     pairwise_kappa = {
         (fluid_dd, wall_dd):
-            (fluid_state.thermal_conductivity, wall_model.thermal_conductivity)}
+            (fluid_state.thermal_conductivity, wall_kappa)}
     return inter_volume_trace_pairs(
         dcoll, pairwise_kappa, comm_tag=_KappaInterVolTag)
 
@@ -413,6 +415,8 @@ def get_interface_boundaries(
         gas_model, wall_model,
         fluid_dd, wall_dd,
         fluid_state, wall_temperature,
+        # FIXME: Create a state object for the wall
+        wall_kappa,
         fluid_grad_temperature=None, wall_grad_temperature=None,
         wall_penalty_amount=None,
         quadrature_tag=DISCR_TAG_BASE,
@@ -441,7 +445,8 @@ def get_interface_boundaries(
             dcoll,
             gas_model, wall_model,
             fluid_dd, wall_dd,
-            fluid_state, wall_temperature)
+            fluid_state, wall_temperature,
+            wall_kappa)
     else:
         kappa_inter_vol_tpairs = _kappa_inter_vol_tpairs
 
@@ -512,7 +517,9 @@ def coupled_grad_t_operator(
         gas_model, wall_model,
         fluid_dd, wall_dd,
         fluid_boundaries, wall_boundaries,
-        fluid_state, wall_temperature, *,
+        fluid_state, wall_temperature,
+        # FIXME: Create a state object for the wall
+        wall_kappa, *,
         time=0.,
         fluid_numerical_flux_func=num_flux_central,
         quadrature_tag=DISCR_TAG_BASE,
@@ -536,6 +543,7 @@ def coupled_grad_t_operator(
             gas_model, wall_model,
             fluid_dd, wall_dd,
             fluid_state, wall_temperature,
+            wall_kappa,
             _temperature_inter_vol_tpairs=_temperature_inter_vol_tpairs,
             _kappa_inter_vol_tpairs=_kappa_inter_vol_tpairs)
 
@@ -559,15 +567,17 @@ def coupled_grad_t_operator(
 
 
 def _heat_operator(
-        dcoll, wall_model, boundaries, temperature, *,
+        dcoll, wall_model, boundaries, temperature,
+        # FIXME: Create a state object for the wall
+        wall_density, wall_kappa, *,
         penalty_amount, quadrature_tag, dd,
         # Added to avoid repeated computation
         # FIXME: See if there's a better way to do this
         _grad_temperature=None):
     return (
-        1/(wall_model.density * wall_model.heat_capacity)
+        1/(wall_density * wall_model.heat_capacity)
         * diffusion_operator(
-            dcoll, wall_model.thermal_conductivity, boundaries, temperature,
+            dcoll, wall_kappa, boundaries, temperature,
             penalty_amount=penalty_amount, quadrature_tag=quadrature_tag,
             dd=dd, grad_u=_grad_temperature))
 
@@ -577,7 +587,9 @@ def coupled_ns_heat_operator(
         gas_model, wall_model,
         fluid_dd, wall_dd,
         fluid_boundaries, wall_boundaries,
-        fluid_state, wall_temperature, *,
+        fluid_state, wall_temperature,
+        # FIXME: Create a state object for the wall
+        wall_density, wall_kappa, *,
         time=0., wall_time_scale=1,
         fluid_gradient_numerical_flux_func=num_flux_central,
         inviscid_numerical_flux_func=inviscid_facial_flux_rusanov,
@@ -609,7 +621,8 @@ def coupled_ns_heat_operator(
         dcoll,
         gas_model, wall_model,
         fluid_dd, wall_dd,
-        fluid_state, wall_temperature)
+        fluid_state, wall_temperature,
+        wall_kappa)
 
     fluid_interface_boundaries_no_grad, wall_interface_boundaries_no_grad = \
         get_interface_boundaries(
@@ -617,6 +630,7 @@ def coupled_ns_heat_operator(
             gas_model, wall_model,
             fluid_dd, wall_dd,
             fluid_state, wall_temperature,
+            wall_kappa,
             _temperature_inter_vol_tpairs=temperature_inter_vol_tpairs,
             _kappa_inter_vol_tpairs=kappa_inter_vol_tpairs)
 
@@ -634,6 +648,7 @@ def coupled_ns_heat_operator(
         fluid_dd, wall_dd,
         fluid_boundaries, wall_boundaries,
         fluid_state, wall_temperature,
+        wall_kappa,
         time=time,
         fluid_numerical_flux_func=fluid_gradient_numerical_flux_func,
         quadrature_tag=quadrature_tag,
@@ -647,6 +662,7 @@ def coupled_ns_heat_operator(
             gas_model, wall_model,
             fluid_dd, wall_dd,
             fluid_state, wall_temperature,
+            wall_kappa,
             fluid_grad_temperature, wall_grad_temperature,
             wall_penalty_amount=wall_penalty_amount,
             _temperature_inter_vol_tpairs=temperature_inter_vol_tpairs,
@@ -676,6 +692,7 @@ def coupled_ns_heat_operator(
 
     wall_rhs = wall_time_scale * _heat_operator(
         dcoll, wall_model, wall_all_boundaries, wall_temperature,
+        wall_density, wall_kappa,
         penalty_amount=wall_penalty_amount, quadrature_tag=quadrature_tag,
         dd=wall_dd, _grad_temperature=wall_grad_temperature)
 

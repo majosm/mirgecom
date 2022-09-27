@@ -232,10 +232,9 @@ def test_thermally_coupled_fluid_wall(
         wall_density = 10*fluid_density
         wall_heat_capacity = fluid_heat_capacity
         wall_kappa = 10*fluid_kappa
+        # FIXME
         wall_model = WallModel(
-            density=wall_density,
-            heat_capacity=wall_heat_capacity,
-            thermal_conductivity=wall_kappa)
+            heat_capacity=wall_heat_capacity)
 
         base_wall_temp = 600
 
@@ -327,6 +326,7 @@ def test_thermally_coupled_fluid_wall(
                 dd_vol_fluid, dd_vol_wall,
                 fluid_boundaries, wall_boundaries,
                 fluid_state, wall_temp,
+                wall_density, wall_kappa,
                 time=t,
                 quadrature_tag=quadrature_tag)
             fluid_rhs = replace(
