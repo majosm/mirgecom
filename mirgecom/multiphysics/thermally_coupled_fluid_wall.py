@@ -361,6 +361,7 @@ class InterfaceFluidSlipBoundary(PrescribedFluidBoundary):
         else:
             return self.ext_grad_t
 
+
 class InterfaceFluidBoundary(PrescribedFluidBoundary):
     """Interface boundary condition for the fluid side."""
 
@@ -400,7 +401,7 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
 
         # Cancel out the momentum
         cv_minus = state_minus.cv
-        ext_mom = -cv_minus.momentum
+        ext_mom = 0.*state_minus.momentum_density
 
         # Compute the energy
         ext_internal_energy = (
@@ -537,16 +538,13 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
             state_minus.tv.thermal_conductivity,
             state_plus.tv.thermal_conductivity)
 
-        state_pair_with_harmonic_mean_coefs = TracePair(
-            dd_bdry,
-            interior=replace_kappa(state_minus, kappa_harmonic_mean),
-            exterior=replace_kappa(state_plus, kappa_harmonic_mean))
+        state_plus_harmonic_kappa = replace_kappa(state_plus, kappa_harmonic_mean)
 
-        f_int = viscous_flux(
-            state_pair_with_harmonic_mean_coefs.int, grad_cv_bc, grad_t_minus)
-        f_ext = viscous_flux(
-            state_pair_with_harmonic_mean_coefs.ext, grad_cv_bc, grad_t_plus)
-        f_pair = TracePair(dd_bdry, interior=f_int, exterior=f_ext)
+        # need to sum grad_t_plus and grad_t_minus
+        # assumes the harmonic flux
+        grad_t_interface = (grad_t_plus + grad_t_minus)/2.
+        viscous_flux = viscous_flux(state_plus_harmonic_kappa,
+                                    grad_cv_bc, grad_t_interface)
 
         lengthscales = op.project(dcoll, dd_bdry_base, dd_bdry, self.lengthscales)
 
@@ -555,7 +553,7 @@ class InterfaceFluidBoundary(PrescribedFluidBoundary):
 
         # NS and diffusion use opposite sign conventions for flux; hence penalty
         # is added here instead of subtracted
-        flux_without_penalty = f_pair.avg @ normal
+        flux_without_penalty = viscous_flux @ normal
         return replace(
             flux_without_penalty,
             energy=(
