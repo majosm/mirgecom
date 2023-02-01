@@ -753,31 +753,22 @@ def get_interface_boundaries(
             * (0*fluid_state.temperature+1))
 
         if interface_noslip:
-            fluid_interface_boundaries = {
-                kappa_tpair.dd.domain_tag: InterfaceFluidBoundary(
-                    kappa_tpair.ext,
-                    temperature_tpair.ext,
-                    grad_temperature_tpair.ext,
-                    wall_penalty_amount,
-                    lengthscales=op.project(dcoll,
-                        fluid_dd, temperature_tpair.dd, fluid_lengthscales))
-                for kappa_tpair, temperature_tpair, grad_temperature_tpair in zip(
-                    kappa_inter_vol_tpairs[wall_dd, fluid_dd],
-                    temperature_inter_vol_tpairs[wall_dd, fluid_dd],
-                    grad_temperature_inter_vol_tpairs[wall_dd, fluid_dd])}
+            fluid_bc_class = InterfaceFluidBoundary
         else:
-            fluid_interface_boundaries = {
-                kappa_tpair.dd.domain_tag: InterfaceFluidSlipBoundary(
-                    kappa_tpair.ext,
-                    temperature_tpair.ext,
-                    grad_temperature_tpair.ext,
-                    wall_penalty_amount,
-                    lengthscales=op.project(dcoll,
-                        fluid_dd, temperature_tpair.dd, fluid_lengthscales))
-                for kappa_tpair, temperature_tpair, grad_temperature_tpair in zip(
-                    kappa_inter_vol_tpairs[wall_dd, fluid_dd],
-                    temperature_inter_vol_tpairs[wall_dd, fluid_dd],
-                    grad_temperature_inter_vol_tpairs[wall_dd, fluid_dd])}
+            fluid_bc_class = InterfaceFluidSlipBoundary
+
+        fluid_interface_boundaries = {
+            kappa_tpair.dd.domain_tag: fluid_bc_class(
+                kappa_tpair.ext,
+                temperature_tpair.ext,
+                grad_temperature_tpair.ext,
+                wall_penalty_amount,
+                lengthscales=op.project(dcoll,
+                    fluid_dd, temperature_tpair.dd, fluid_lengthscales))
+            for kappa_tpair, temperature_tpair, grad_temperature_tpair in zip(
+                kappa_inter_vol_tpairs[wall_dd, fluid_dd],
+                temperature_inter_vol_tpairs[wall_dd, fluid_dd],
+                grad_temperature_inter_vol_tpairs[wall_dd, fluid_dd])}
 
         wall_interface_boundaries = {
             kappa_tpair.dd.domain_tag: InterfaceWallBoundary(
