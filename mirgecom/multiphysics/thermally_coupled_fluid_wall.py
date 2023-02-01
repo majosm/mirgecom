@@ -54,7 +54,6 @@ from mirgecom.boundary import PrescribedFluidBoundary
 from mirgecom.fluid import make_conserved
 from mirgecom.flux import num_flux_central
 from mirgecom.inviscid import inviscid_facial_flux_rusanov
-from mirgecom.viscous import viscous_facial_flux_central
 from mirgecom.viscous import viscous_facial_flux_harmonic
 from mirgecom.gas_model import (
     make_fluid_state,
