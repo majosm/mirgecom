@@ -154,7 +154,6 @@ class InterfaceFluidSlipBoundary(PrescribedFluidBoundary):
             * gas_model.eos.get_internal_energy(
                 temperature=ext_t,
                 species_mass_fractions=cv_minus.species_mass_fractions))
-        #ext_kinetic_energy = gas_model.eos.kinetic_energy(cv_minus)
         ext_kinetic_energy = 0.5*np.dot(ext_mom, ext_mom)/cv_minus.mass
         ext_energy = ext_internal_energy + ext_kinetic_energy
 
@@ -225,7 +224,8 @@ class InterfaceFluidSlipBoundary(PrescribedFluidBoundary):
             grad_av_minus.dim, mass=grad_av_minus.mass, energy=ext_grad_energy,
             momentum=grad_av_minus.momentum, species_mass=ext_grad_species_mass)
 
-    def get_external_grad_cv(self, state_minus, state_plus, grad_cv_minus, normal, **kwargs):
+    def get_external_grad_cv(self, state_minus, state_plus, grad_cv_minus,
+                             normal, **kwargs):
         """
         Return external grad(CV) used in the boundary calculation of viscous flux.
 
