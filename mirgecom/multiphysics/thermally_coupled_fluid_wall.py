@@ -761,7 +761,7 @@ class InterfaceFluidRadiationBoundary(PrescribedFluidBoundary):
 
         This is the same logic of an isothermal BC.
         """
-        return _project_from_base(dcoll, dd_bdry, grad_t_minus)
+        return grad_t_minus
 
 
 class InterfaceFluidSlipRadiationBoundary(PrescribedFluidBoundary):
@@ -909,7 +909,7 @@ class InterfaceFluidSlipRadiationBoundary(PrescribedFluidBoundary):
 
         This is the same logic of an isothermal BC.
         """
-        return _project_from_base(dcoll, dd_bdry, grad_t_minus)
+        return grad_t_minus
 
 # }}}
 
