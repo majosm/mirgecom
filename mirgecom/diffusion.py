@@ -2,6 +2,7 @@ r""":mod:`mirgecom.diffusion` computes the diffusion operator.
 
 .. autofunction:: weighted_grad_facial_flux
 .. autofunction:: average_grad_facial_flux
+.. autofunction:: upwind_grad_facial_flux
 .. autofunction:: diffusion_facial_flux
 .. autofunction:: grad_operator
 .. autofunction:: diffusion_operator
@@ -82,6 +83,16 @@ def average_grad_facial_flux(kappa_tpair, u_tpair, normal):
         \bar{u} = \frac{1}{2} (u^- + u^+)
     """
     return -u_tpair.avg * normal
+
+
+def upwind_grad_facial_flux(kappa_tpair, u_tpair, normal):
+    r"""Compute the numerical flux for $\nabla u$ using the exterior value.
+
+    .. math::
+
+        \bar{u} = u^+
+    """
+    return -u_tpair.ext * normal
 
 
 def diffusion_flux(kappa, grad_u):

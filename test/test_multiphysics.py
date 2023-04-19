@@ -163,7 +163,7 @@ def test_independent_volumes(actx_factory, order, visualize=False):
 @pytest.mark.parametrize("order", [2, 3])
 @pytest.mark.parametrize("use_overintegration", [False, True])
 def test_thermally_coupled_fluid_wall(
-        actx_factory, order, use_overintegration, visualize=False):
+        actx_factory, order, use_overintegration, visualize=True):
     """Check the thermally-coupled fluid/wall interface."""
     actx = actx_factory()
 
@@ -171,7 +171,7 @@ def test_thermally_coupled_fluid_wall(
     eoc_rec_fluid = EOCRecorder()
     eoc_rec_wall = EOCRecorder()
 
-    scales = [6, 8, 12]
+    scales = [6, 8, 12, 16, 20]
 
     for n in scales:
         global_mesh = get_box_mesh(2, -1, 1, n)
@@ -346,40 +346,40 @@ def test_thermally_coupled_fluid_wall(
 
         # Check that steady-state solution has 0 RHS
 
-        # t_large = 1e6
-        # fluid_temp = fluid_func(fluid_nodes, t_large)
-        # wall_temp = wall_func(wall_nodes, t_large)
+        t_large = 1e6
+        fluid_temp = fluid_func(fluid_nodes, t_large)
+        wall_temp = wall_func(wall_nodes, t_large)
 
-        # state = make_obj_array([cv_from_temp(fluid_temp), wall_temp])
+        state = make_obj_array([cv_from_temp(fluid_temp), wall_temp])
 
-        # rhs = get_rhs(t_large, state)
+        rhs = get_rhs(t_large, state)
 
-        # if visualize:
-        #     fluid_state = make_fluid_state(state[0], gas_model)
-        #     viz_fluid.write_vtk_file(
-        #         f"multiphysics_thermally_coupled_steady_{viz_suffix}_fluid.vtu", [
-        #             ("cv", fluid_state.cv),
-        #             ("dv", fluid_state.dv),
-        #             ("rhs", rhs[0]),
-        #             ])
-        #     viz_wall.write_vtk_file(
-        #         f"multiphysics_thermally_coupled_steady_{viz_suffix}_wall.vtu", [
-        #             ("temp", state[1]),
-        #             ("rhs", rhs[1]),
-        #             ])
+        if visualize:
+            fluid_state = make_fluid_state(state[0], gas_model)
+            viz_fluid.write_vtk_file(
+                f"multiphysics_thermally_coupled_steady_{viz_suffix}_fluid.vtu", [
+                    ("cv", fluid_state.cv),
+                    ("dv", fluid_state.dv),
+                    ("rhs", rhs[0]),
+                    ])
+            viz_wall.write_vtk_file(
+                f"multiphysics_thermally_coupled_steady_{viz_suffix}_wall.vtu", [
+                    ("temp", state[1]),
+                    ("rhs", rhs[1]),
+                    ])
 
-        # fluid_cv = cv_from_temp(fluid_temp)
-        # linf_err_fluid = max_component_norm(
-        #     dcoll,
-        #     rhs[0]/replace(fluid_cv, momentum=0*fluid_cv.momentum+1),
-        #     np.inf,
-        #     dd=dd_vol_fluid)
-        # linf_err_wall = actx.to_numpy(
-        #     op.norm(dcoll, rhs[1], np.inf, dd=dd_vol_wall)
-        #     / op.norm(dcoll, wall_temp, np.inf, dd=dd_vol_wall))
+        fluid_cv = cv_from_temp(fluid_temp)
+        linf_err_fluid = max_component_norm(
+            dcoll,
+            rhs[0]/replace(fluid_cv, momentum=0*fluid_cv.momentum+1),
+            np.inf,
+            dd=dd_vol_fluid)
+        linf_err_wall = actx.to_numpy(
+            op.norm(dcoll, rhs[1], np.inf, dd=dd_vol_wall)
+            / op.norm(dcoll, wall_temp, np.inf, dd=dd_vol_wall))
 
-        # assert linf_err_fluid < 1e-6
-        # assert linf_err_wall < 1e-6
+        assert linf_err_fluid < 1e-6
+        assert linf_err_wall < 1e-6
 
         # Now check accuracy/stability
 

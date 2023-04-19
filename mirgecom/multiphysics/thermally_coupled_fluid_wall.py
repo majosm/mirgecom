@@ -90,7 +90,7 @@ from mirgecom.diffusion import (
     grad_operator as wall_grad_t_operator,
     diffusion_operator,
     diffusion_flux,
-    average_grad_facial_flux,
+    upwind_grad_facial_flux,
     weighted_grad_facial_flux
 )
 
@@ -208,16 +208,9 @@ def _diffusion_facial_flux_upwind_with_radiation(
 
     actx = u_tpair.int.array_context
 
-    # FIXME not entirely sure about this. Need to keep an eye on it...
-    # Computing a centered flux "int + ext - radiation"
-    # TRR: I disagree about the signs here, but that may be because of the
-    # normal orientation...
-    flux_on_solid_side = \
-        np.dot(diffusion_flux(kappa_tpair.int, grad_u_tpair.int), normal)
-    flux_on_fluid_side = (
+    flux_without_penalty = (
         np.dot(diffusion_flux(kappa_tpair.ext, grad_u_tpair.ext), normal)
         + epsilon_minus * sigma * u_tpair.int**4)
-    flux_without_penalty = 0.5*(flux_on_solid_side + flux_on_fluid_side)
 
     # TODO: Figure out what this is really supposed to be
     # MJS: Not sure if interior penalty even makes sense for this version
@@ -697,7 +690,7 @@ class InterfaceFluidRadiationBoundary(PrescribedFluidBoundary):
 
         t_minus = state_minus.temperature
         t_plus = _project_from_base(dcoll, dd_bdry, self._t_plus)
-        t_bc = (t_minus + t_plus)/2.0  # XXX Maybe use t_bc as t_plus?
+        t_bc = t_plus
 
         internal_energy_bc = gas_model.eos.get_internal_energy(
             temperature=t_bc,
@@ -714,20 +707,9 @@ class InterfaceFluidRadiationBoundary(PrescribedFluidBoundary):
             momentum=mom_bc,
             species_mass=cv_minus.species_mass)
 
-        kappa_minus = (
-            # Make sure it has an array context
-            state_minus.tv.thermal_conductivity + 0.*state_minus.mass_density)
-        kappa_bc = _project_from_base(dcoll, dd_bdry, kappa_minus)
-
-        # The thermal conductivity "kappa_bc" uses "kappa_minus",
-        # but for a temperature-dependent kappa, the math will use t_bc,
-        # which is the average. They SHOULD be the same, but it wont due to
-        # (small) discretization errors. Commenting this out just in case...
-        return _replace_kappa(
-            make_fluid_state(
-                cv=cv_bc, gas_model=gas_model,
-                temperature_seed=state_minus.temperature),
-            kappa_bc)
+        return make_fluid_state(
+            cv=cv_bc, gas_model=gas_model,
+            temperature_seed=state_minus.temperature)
 
     def grad_cv_bc(
             self, dcoll, dd_bdry, gas_model, state_minus, state_bc, grad_cv_minus,
@@ -840,7 +822,7 @@ class InterfaceFluidSlipRadiationBoundary(PrescribedFluidBoundary):
 
         t_minus = state_minus.temperature
         t_plus = _project_from_base(dcoll, dd_bdry, self._t_plus)
-        t_bc = (t_minus + t_plus)/2.0  # XXX Maybe use t_bc as t_plus?
+        t_bc = t_plus
 
         internal_energy_bc = cv_minus.mass * gas_model.eos.get_internal_energy(
             temperature=t_bc,
@@ -857,20 +839,9 @@ class InterfaceFluidSlipRadiationBoundary(PrescribedFluidBoundary):
             momentum=mom_bc,
             species_mass=cv_minus.species_mass)
 
-        kappa_minus = (
-            # Make sure it has an array context
-            state_minus.tv.thermal_conductivity + 0.*state_minus.mass_density)
-        kappa_bc = _project_from_base(dcoll, dd_bdry, kappa_minus)
-
-        # The thermal conductivity "kappa_bc" uses "kappa_minus",
-        # but for a temperature-dependent kappa, the math will use t_bc,
-        # which is the average. They SHOULD be the same, but it wont due to
-        # (small) discretization errors. Commenting this out just in case...
-        return _replace_kappa(
-            make_fluid_state(
-                cv=cv_bc, gas_model=gas_model,
-                temperature_seed=state_minus.temperature),
-            kappa_bc)
+        return make_fluid_state(
+            cv=cv_bc, gas_model=gas_model,
+            temperature_seed=state_minus.temperature)
 
     def grad_cv_bc(
             self, dcoll, dd_bdry, gas_model, state_minus, state_bc, grad_cv_minus,
@@ -1005,7 +976,7 @@ class InterfaceWallRadiationBoundary(DiffusionBoundary):
         u_plus = _project_from_base(dcoll, dd_bdry, self.u_plus)
         u_tpair = TracePair(dd_bdry, interior=u_minus, exterior=u_plus)
 
-        return average_grad_facial_flux(kappa_tpair, u_tpair, normal)
+        return upwind_grad_facial_flux(kappa_tpair, u_tpair, normal)
 
     def get_diffusion_flux(
             self, dcoll, dd_bdry, kappa_minus, u_minus, grad_u_minus,
