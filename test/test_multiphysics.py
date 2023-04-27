@@ -163,7 +163,7 @@ def test_independent_volumes(actx_factory, order, visualize=False):
 @pytest.mark.parametrize("order", [2, 3])
 @pytest.mark.parametrize("use_overintegration", [False, True])
 def test_thermally_coupled_fluid_wall(
-        actx_factory, order, use_overintegration, visualize=False):
+        actx_factory, order, use_overintegration, visualize=True):
     """Check the thermally-coupled fluid/wall interface."""
     actx = actx_factory()
 
@@ -171,7 +171,7 @@ def test_thermally_coupled_fluid_wall(
     eoc_rec_fluid = EOCRecorder()
     eoc_rec_wall = EOCRecorder()
 
-    scales = [6, 8, 12]
+    scales = [6, 8, 12, 16, 20]
 
     for n in scales:
         global_mesh = get_box_mesh(2, -1, 1, n)
@@ -323,7 +323,9 @@ def test_thermally_coupled_fluid_wall(
                 fluid_boundaries, wall_boundaries,
                 fluid_state, wall_kappa, wall_temperature,
                 time=t,
-                quadrature_tag=quadrature_tag)
+                quadrature_tag=quadrature_tag,
+                interface_radiation=True,
+                wall_epsilon=0)
             fluid_rhs = replace(
                 fluid_rhs,
                 momentum=fluid_rhs.momentum + momentum_source_func(fluid_nodes, t))

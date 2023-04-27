@@ -514,10 +514,10 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
 
         # All surface contributions from the inviscid fluxes
         - inviscid_flux_on_element_boundary(
-            dcoll, gas_model, boundaries, inter_elem_bnd_states_quad,
-            domain_bnd_states_quad, quadrature_tag=quadrature_tag,
-            numerical_flux_func=inviscid_numerical_flux_func, time=time,
-            dd=dd_vol)
+           dcoll, gas_model, boundaries, inter_elem_bnd_states_quad,
+           domain_bnd_states_quad, quadrature_tag=quadrature_tag,
+           numerical_flux_func=inviscid_numerical_flux_func, time=time,
+           dd=dd_vol)
 
     )
     ns_rhs = div_operator(dcoll, dd_vol_quad, dd_allfaces_quad, vol_term, bnd_term)
