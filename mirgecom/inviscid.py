@@ -295,13 +295,17 @@ def inviscid_flux_on_element_boundary(
     dd_vol = dd
     dd_vol_quad = dd_vol.with_discr_tag(quadrature_tag)
     dd_allfaces_quad = dd_vol_quad.trace(FACE_RESTR_ALL)
+    actx = interior_state_pairs[0].int.array_context
+
+    @actx.outline
+    def outlined_num_flux(state_pair, normal):
+        return numerical_flux_func(state_pair, gas_model, normal)
 
     def _interior_flux(state_pair):
+        normal = geo.normal(state_pair.int.array_context, dcoll, state_pair.dd)
         return op.project(dcoll,
             state_pair.dd, dd_allfaces_quad,
-            numerical_flux_func(
-                state_pair, gas_model,
-                geo.normal(state_pair.int.array_context, dcoll, state_pair.dd)))
+            outlined_num_flux(state_pair, normal))
 
     def _boundary_flux(bdtag, boundary, state_minus_quad):
         dd_bdry_quad = dd_vol_quad.with_domain_tag(bdtag)

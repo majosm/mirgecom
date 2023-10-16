@@ -96,7 +96,7 @@ from mirgecom.operators import (
     div_operator, grad_operator
 )
 from mirgecom.gas_model import make_operator_fluid_states
-from mirgecom.utils import normalize_boundaries
+from mirgecom.utils import normalize_boundaries, force_materialize
 
 
 class _NSGradCVTag:
@@ -107,13 +107,12 @@ class _NSGradTemperatureTag:
     pass
 
 
-class _ESFluidCVTag():
+class _ESFluidCVTag:
     pass
 
 
-class _ESFluidTemperatureTag():
+class _ESFluidTemperatureTag:
     pass
-
 
 def _gradient_flux_interior(dcoll, numerical_flux_func, tpair):
     """Compute interior face flux for gradient operator."""
@@ -122,8 +121,12 @@ def _gradient_flux_interior(dcoll, numerical_flux_func, tpair):
     dd_trace = tpair.dd
     dd_allfaces = dd_trace.with_boundary_tag(FACE_RESTR_ALL)
     normal = geo.normal(actx, dcoll, dd_trace)
-    flux = outer(numerical_flux_func(tpair.int, tpair.ext), normal)
-    return op.project(dcoll, dd_trace, dd_allfaces, flux)
+
+    @actx.outline
+    def outlined_num_flux(tpair, normal):
+        return outer(numerical_flux_func(tpair.int, tpair.ext), normal)
+
+    return op.project(dcoll, dd_trace, dd_allfaces, outlined_num_flux(tpair, normal))
 
 
 def grad_cv_operator(
@@ -458,6 +461,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
     dd_vol = dd
     dd_vol_quad = dd_vol.with_discr_tag(quadrature_tag)
     dd_allfaces_quad = dd_vol_quad.trace(FACE_RESTR_ALL)
+    actx = state.array_context
 
     # Make model-consistent fluid state data (i.e. CV *and* DV) for:
     # - Volume: vol_state_quad
@@ -482,7 +486,9 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
     # {{{ Local utilities
 
     # transfer trace pairs to quad grid, update pair dd
-    interp_to_surf_quad = partial(tracepair_with_discr_tag, dcoll, quadrature_tag)
+    @actx.outline
+    def interp_to_surf_quad(tpair):
+        return tracepair_with_discr_tag(dcoll, quadrature_tag, tpair)
 
     # }}}
 
@@ -495,6 +501,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
             quadrature_tag=quadrature_tag, dd=dd_vol,
             operator_states_quad=operator_states_quad, comm_tag=comm_tag,
             use_esdg=use_esdg, limiter_func=limiter_func)
+        grad_cv = force_materialize(actx, grad_cv)
 
     # Communicate grad(CV) and put it on the quadrature domain
     grad_cv_interior_pairs = [
@@ -516,6 +523,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
             quadrature_tag=quadrature_tag, dd=dd_vol,
             operator_states_quad=operator_states_quad, comm_tag=comm_tag,
             use_esdg=use_esdg, limiter_func=limiter_func)
+        grad_t = force_materialize(actx, grad_t)
 
     # Create the interior face trace pairs, perform MPI exchange, interp to quad
     grad_t_interior_pairs = [
@@ -536,6 +544,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
                      # Interpolate gradients to the quadrature grid
                      grad_cv=op.project(dcoll, dd_vol, dd_vol_quad, grad_cv),
                      grad_t=op.project(dcoll, dd_vol, dd_vol_quad, grad_t))
+    vol_term = force_materialize(actx, vol_term)
 
     # Physical viscous flux (f .dot. n) is the boundary term for the div op
     bnd_term = viscous_flux_on_element_boundary(
@@ -544,6 +553,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
         grad_t, grad_t_interior_pairs, quadrature_tag=quadrature_tag,
         numerical_flux_func=viscous_numerical_flux_func, time=time,
         dd=dd_vol)
+    bnd_term = force_materialize(actx, bnd_term)
 
     # Add corresponding inviscid parts if enabled
     # Note that this is the default, and highest performing path.
@@ -551,13 +561,16 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
     # or use ESDG.
     if inviscid_terms_on and inviscid_fluid_operator is None:
         vol_term = vol_term - inviscid_flux(state=vol_state_quad)
+        vol_term = force_materialize(actx, vol_term)
         bnd_term = bnd_term - inviscid_flux_on_element_boundary(
             dcoll, gas_model, boundaries, inter_elem_bnd_states_quad,
             domain_bnd_states_quad, quadrature_tag=quadrature_tag,
             numerical_flux_func=inviscid_numerical_flux_func, time=time,
             dd=dd_vol)
+        bnd_term = force_materialize(actx, bnd_term)
 
     ns_rhs = div_operator(dcoll, dd_vol_quad, dd_allfaces_quad, vol_term, bnd_term)
+    ns_rhs = force_materialize(actx, ns_rhs)
 
     # Call an external operator for the inviscid terms (Euler by default)
     # ESDG *always* uses this branch
@@ -566,6 +579,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
             dcoll, state=state, gas_model=gas_model, boundaries=boundaries,
             time=time, dd=dd, comm_tag=comm_tag, quadrature_tag=quadrature_tag,
             operator_states_quad=operator_states_quad)
+        ns_rhs = force_materialize(actx, ns_rhs)
 
     if return_gradients:
         return ns_rhs, grad_cv, grad_t

@@ -136,6 +136,65 @@ def force_compile(actx, f, *args):
     return f_compiled
 
 
+def force_materialize(actx, x):
+    # TODO: check if lazy
+
+    dict_of_named_arrays = {}
+
+    def unpack(keys, subary):
+        dict_of_named_arrays[keys] = subary
+        return subary
+
+    from arraycontext.container.traversal import rec_keyed_map_array_container
+    rec_keyed_map_array_container(unpack, x)
+
+    from pytato.array import make_dict_of_named_arrays
+    dict_of_named_arrays = make_dict_of_named_arrays(dict_of_named_arrays)
+
+    # Deduplicate nodes before processing
+    from pytato.transform import CopyMapper
+    dict_of_named_arrays = CopyMapper(err_on_collision=False)(dict_of_named_arrays)
+
+    fields = frozenset(dict_of_named_arrays._data.values())
+
+    call_cache = {}
+
+    def materialize(expr):
+        from pytato.array import Placeholder, DataWrapper
+        from pytato.tags import ImplStored
+        if (
+                expr in fields
+                and not isinstance(expr, (Placeholder, DataWrapper))):
+            from pytato.function import NamedCallResult
+            if not isinstance(expr, NamedCallResult):
+                if not expr.tags_of_type(ImplStored):
+                    return expr.tagged(ImplStored())
+                else:
+                    return expr
+            else:
+                if not expr._container.tags_of_type(ImplStored):
+                    call = expr._container.tagged(ImplStored())
+                    try:
+                        call = call_cache[call]
+                    except KeyError:
+                        call_cache[call] = call
+                    return call[expr.name]
+                else:
+                    return expr
+        else:
+            return expr
+
+    # Need to do this instead of just tagging dict_of_named_arrays arrays directly,
+    # because some of the arrays may exist as subexpressions in other arrays
+    from pytato.transform import map_and_copy
+    dict_of_named_arrays = map_and_copy(dict_of_named_arrays, materialize)
+
+    def pack(keys, subary):
+        return dict_of_named_arrays._data[keys]
+
+    return rec_keyed_map_array_container(pack, x)
+
+
 def normalize_boundaries(boundaries):
     """
     Normalize the keys of *boundaries*.
