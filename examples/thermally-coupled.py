@@ -144,10 +144,19 @@ def main(actx_class, use_esdg=False, use_overintegration=False,
         assert restart_data["num_ranks"] == num_ranks
     else:  # generate the grid from scratch
         def get_mesh_data():
-            from meshmode.mesh.io import read_gmsh
-            mesh, tag_to_elements = read_gmsh(
-                f"{local_path}/multivolume.msh", force_ambient_dim=2,
-                return_tag_to_elements_map=True)
+            from meshmode.mesh.generation import generate_regular_rect_mesh
+            mesh = generate_regular_rect_mesh(
+                a=(-0.01,)*dim, b=(0.01,)*dim, nelements_per_axis=(32,)*dim,
+                boundary_tag_to_face={
+                    "Sides": ["-x", "+x"],
+                    "Top": ["+y"],
+                    "Bottom": ["-y"]})
+            mgrp = mesh.groups[0]
+            y = mgrp.nodes[1, :, :]
+            y_avg = np.sum(y, axis=1)/y.shape[1]
+            tag_to_elements = {
+                "Lower": np.where(y_avg < 0)[0],
+                "Upper": np.where(y_avg > 0)[0]}
             volume_to_tags = {
                 "Fluid": ["Upper"],
                 "Wall": ["Lower"]}
@@ -288,10 +297,14 @@ def main(actx_class, use_esdg=False, use_overintegration=False,
     current_state = make_obj_array([current_cv, current_wall_temperature])
 
     fluid_boundaries = {
-        dd_vol_fluid.trace("Upper Sides").domain_tag:  # pylint: disable=no-member
+        dd_vol_fluid.trace("Sides").domain_tag:  # pylint: disable=no-member
+        IsothermalWallBoundary(wall_temperature=isothermal_wall_temp),
+        dd_vol_fluid.trace("Top").domain_tag:  # pylint: disable=no-member
         IsothermalWallBoundary(wall_temperature=isothermal_wall_temp)}
     wall_boundaries = {
-        dd_vol_wall.trace("Lower Sides").domain_tag:  # pylint: disable=no-member
+        dd_vol_wall.trace("Sides").domain_tag:  # pylint: disable=no-member
+        NeumannDiffusionBoundary(0),
+        dd_vol_wall.trace("Bottom").domain_tag:  # pylint: disable=no-member
         NeumannDiffusionBoundary(0)}
 
     fluid_visualizer = make_visualizer(dcoll, volume_dd=dd_vol_fluid)
