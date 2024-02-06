@@ -248,6 +248,56 @@ class DecayingTrigTruncatedDomain(HeatProblem):
         return boundaries
 
 
+# 1D: u(x,t) = u_ref + exp(-w**2*kappa*t)*cos(w*x)
+# 2D: u(x,y,t) = u_ref + exp(-(1+w**2)*kappa*t)*sin(x)*cos(w*y)
+# 3D: u(x,y,z,t) = u_ref + exp(-(2+w**2)*kappa*t)*sin(x)*sin(y)*cos(w*z)
+# on ([-pi/2, pi/2],)^{#dims-1} + ([-L, L/2],)
+# where w == alpha/kappa and L = pi/(2*w)
+class DecayingTrigRobinBoundary(HeatProblem):
+    def __init__(self, dim, u_ref, kappa, alpha):
+        super().__init__(dim)
+        self._u_ref = u_ref
+        self._kappa = kappa
+        self._alpha = alpha
+        self._w = alpha/kappa
+
+    def get_mesh(self, n):
+        return get_box_mesh(
+            self.dim,
+            a=(-np.pi/2,)*(self.dim-1) + (-np.pi/(2*self._w),),
+            b=(np.pi/2,)*(self.dim-1) + (np.pi/(4*self._w),),
+            n=n)
+
+    def get_solution(self, x, t):
+        u = mm.exp(-(self.dim-1 + self._w**2)*self._kappa*t)
+        for i in range(self.dim-1):
+            u = u * mm.sin(x[i])
+        u = u * mm.cos(self._w * x[self.dim-1])
+        u = u + self._u_ref
+        return u
+
+    def get_kappa(self, x, t, u):
+        return self._kappa
+
+    def get_source_term(self, x, t, u):
+        return x[0]*0.0
+
+    def get_boundaries(self, dcoll, actx, t, value=None, alpha=None):
+        boundaries = {}
+
+        for i in range(self.dim-1):
+            lower_bdtag = BoundaryDomainTag("-"+str(i+1))
+            upper_bdtag = BoundaryDomainTag("+"+str(i+1))
+            boundaries[lower_bdtag] = NeumannDiffusionBoundary(0.)
+            boundaries[upper_bdtag] = NeumannDiffusionBoundary(0.)
+        lower_bdtag = BoundaryDomainTag("-"+str(self.dim))
+        upper_bdtag = BoundaryDomainTag("+"+str(self.dim))
+        boundaries[lower_bdtag] = DirichletDiffusionBoundary(self._u_ref)
+        boundaries[upper_bdtag] = RobinDiffusionBoundary(self._u_ref, self._alpha)
+
+        return boundaries
+
+
 # 1D: kappa(x) = 1+0.2*cos(3*x)
 #     u(x,t)   = cos(t)*cos(x) (manufactured)
 # 2D: kappa(x,y) = 1+0.2*cos(3*x)*cos(3*y)
@@ -390,6 +440,8 @@ def sym_diffusion(dim, sym_kappa, sym_u):
         # (OscillatingTrigVarDiff(2), 50, 5.e-5, [12, 14, 16], None),
         # (OscillatingTrigNonlinearDiff(1), 50, 5.e-5, [8, 16, 24], None),
         # (OscillatingTrigNonlinearDiff(2), 50, 5.e-5, [12, 14, 16], None),
+        (DecayingTrigRobinBoundary(1, 1., 2., 4.), 50, 1.e-5, [8, 16, 24], None),
+        (DecayingTrigRobinBoundary(2, 1., 2., 4.), 50, 1.e-5, [12, 14, 16], None),
         (RobinBndConditionTest(2, 1.), 500, 5.e-6, [16, 24, 32], ("-2", 0.0, 10.0)),
     ])
 def test_diffusion_accuracy(actx_factory, problem, nsteps, dt, scales, order,
@@ -471,6 +523,7 @@ def test_diffusion_accuracy(actx_factory, problem, nsteps, dt, scales, order,
             rel_linf_err = actx.to_numpy(op.norm(dcoll, error, np.inf))
         else:
             expected_u = p.get_solution(nodes, t)
+            kappa = p.get_kappa(nodes, t, u)
             grad_u = grad_operator(dcoll=dcoll, kappa=kappa,
                                    boundaries=p.get_boundaries(
                                        dcoll, actx, t, value=value, alpha=alpha),
