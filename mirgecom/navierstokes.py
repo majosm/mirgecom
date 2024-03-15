@@ -98,6 +98,14 @@ from mirgecom.gas_model import make_operator_fluid_states
 from mirgecom.utils import normalize_boundaries
 
 
+class _GradCVInteriorFaceFluxTag:
+    pass
+
+
+class _GradTemperatureInteriorFaceFluxTag:
+    pass
+
+
 class _NSGradCVTag:
     pass
 
@@ -106,23 +114,36 @@ class _NSGradTemperatureTag:
     pass
 
 
-class _ESFluidCVTag():
+class _InviscidInteriorFaceFluxTag:
     pass
 
 
-class _ESFluidTemperatureTag():
+class _ViscousInteriorFaceFluxTag:
     pass
 
 
-def _gradient_flux_interior(dcoll, numerical_flux_func, tpair):
+class _ESFluidCVTag:
+    pass
+
+
+class _ESFluidTemperatureTag:
+    pass
+
+def _gradient_flux_interior(dcoll, numerical_flux_func, op_id, tpair):
     """Compute interior face flux for gradient operator."""
     from arraycontext import outer
     actx = tpair.int.array_context
     dd_trace = tpair.dd
     dd_allfaces = dd_trace.with_boundary_tag(FACE_RESTR_ALL)
     normal = actx.thaw(dcoll.normal(dd_trace))
-    flux = outer(numerical_flux_func(tpair.int, tpair.ext), normal)
-    return op.project(dcoll, dd_trace, dd_allfaces, flux)
+
+    # FIXME: Can't currently outline this due to the large number of outputs;
+    # causes explosion of candidate concatenatabilities in pytato.concatenate_calls
+    # @actx.outlined(id=op_id)
+    def outlined_num_flux(tpair, normal):
+        return outer(numerical_flux_func(tpair.int, tpair.ext), normal)
+
+    return op.project(dcoll, dd_trace, dd_allfaces, outlined_num_flux(tpair, normal))
 
 
 def grad_cv_operator(
@@ -203,7 +224,8 @@ def grad_cv_operator(
         operator_states_quad
 
     get_interior_flux = partial(
-        _gradient_flux_interior, dcoll, numerical_flux_func)
+        _gradient_flux_interior, dcoll, numerical_flux_func,
+        (_GradCVInteriorFaceFluxTag, comm_tag))
 
     cv_interior_pairs = [TracePair(state_pair.dd,
                                    interior=state_pair.int.cv,
@@ -310,7 +332,8 @@ def grad_t_operator(
         operator_states_quad
 
     get_interior_flux = partial(
-        _gradient_flux_interior, dcoll, numerical_flux_func)
+        _gradient_flux_interior, dcoll, numerical_flux_func,
+        (_GradTemperatureInteriorFaceFluxTag, comm_tag))
 
     # Temperature gradient for conductive heat flux: [Ihme_2014]_ eqn (4c)
     # Capture the temperature for the interior faces for grad(T) calc
@@ -457,6 +480,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
     dd_vol = dd
     dd_vol_quad = dd_vol.with_discr_tag(quadrature_tag)
     dd_allfaces_quad = dd_vol_quad.trace(FACE_RESTR_ALL)
+    actx = state.array_context
 
     # Make model-consistent fluid state data (i.e. CV *and* DV) for:
     # - Volume: vol_state_quad
@@ -481,7 +505,22 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
     # {{{ Local utilities
 
     # transfer trace pairs to quad grid, update pair dd
-    interp_to_surf_quad = partial(tracepair_with_discr_tag, dcoll, quadrature_tag)
+    # FIXME
+    # @tagged_with_call_id
+    # @actx.outline
+    def interp_to_surf_quad_grad_cv(tpair):
+        return tracepair_with_discr_tag(dcoll, quadrature_tag, tpair)
+
+    # interp_to_surf_quad_grad_cv = tagged_with_call_id_and(
+    #     comm_tag, interp_to_surf_quad_grad_cv)
+
+    # @tagged_with_call_id
+    # @actx.outline
+    def interp_to_surf_quad_grad_t(tpair):
+        return tracepair_with_discr_tag(dcoll, quadrature_tag, tpair)
+
+    # interp_to_surf_quad_grad_t = tagged_with_call_id_and(
+    #     comm_tag, interp_to_surf_quad_grad_t)
 
     # }}}
 
@@ -499,7 +538,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
     grad_cv_interior_pairs = [
         # Get the interior trace pairs onto the surface quadrature
         # discretization (if any)
-        interp_to_surf_quad(tpair=tpair)
+        interp_to_surf_quad_grad_cv(tpair=tpair)
         for tpair in interior_trace_pairs(
             dcoll, grad_cv, volume_dd=dd_vol, comm_tag=(_NSGradCVTag, comm_tag))
     ]
@@ -520,7 +559,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
     grad_t_interior_pairs = [
         # Get the interior trace pairs onto the surface quadrature
         # discretization (if any)
-        interp_to_surf_quad(tpair=tpair)
+        interp_to_surf_quad_grad_t(tpair=tpair)
         for tpair in interior_trace_pairs(
             dcoll, grad_t, volume_dd=dd_vol,
             comm_tag=(_NSGradTemperatureTag, comm_tag))
@@ -542,7 +581,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
         domain_bnd_states_quad, grad_cv, grad_cv_interior_pairs,
         grad_t, grad_t_interior_pairs, quadrature_tag=quadrature_tag,
         numerical_flux_func=viscous_numerical_flux_func, time=time,
-        dd=dd_vol)
+        dd=dd_vol, op_tag=(_ViscousInteriorFaceFluxTag, comm_tag))
 
     # Add corresponding inviscid parts if enabled
     # Note that this is the default, and highest performing path.
@@ -554,7 +593,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
             dcoll, gas_model, boundaries, inter_elem_bnd_states_quad,
             domain_bnd_states_quad, quadrature_tag=quadrature_tag,
             numerical_flux_func=inviscid_numerical_flux_func, time=time,
-            dd=dd_vol)
+            dd=dd_vol, op_tag=(_InviscidInteriorFaceFluxTag, comm_tag))
 
     ns_rhs = div_operator(dcoll, dd_vol_quad, dd_allfaces_quad, vol_term, bnd_term)
 

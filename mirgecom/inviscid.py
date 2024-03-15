@@ -243,7 +243,8 @@ def inviscid_flux_on_element_boundary(
         dcoll, gas_model, boundaries, interior_state_pairs,
         domain_boundary_states, quadrature_tag=DISCR_TAG_BASE,
         numerical_flux_func=inviscid_facial_flux_rusanov, time=0.0,
-        dd=DD_VOLUME_ALL):
+        dd=DD_VOLUME_ALL,
+        op_tag=None):
     """Compute the inviscid boundary fluxes for the divergence operator.
 
     This routine encapsulates the computation of the inviscid contributions
@@ -283,6 +284,9 @@ def inviscid_flux_on_element_boundary(
     dd: grudge.dof_desc.DOFDesc
         the DOF descriptor of the discretization on which the fluid lives. Must be
         a volume on the base discretization.
+
+    op_tag: Hashable
+        A tag that uniquely identifies this operation in the calling context.
     """
     boundaries = normalize_boundaries(boundaries)
 
@@ -294,13 +298,17 @@ def inviscid_flux_on_element_boundary(
     dd_vol = dd
     dd_vol_quad = dd_vol.with_discr_tag(quadrature_tag)
     dd_allfaces_quad = dd_vol_quad.trace(FACE_RESTR_ALL)
+    actx = interior_state_pairs[0].int.array_context
+
+    @actx.outlined(id=op_tag)
+    def outlined_num_flux(state_pair, normal):
+        return numerical_flux_func(state_pair, gas_model, normal)
 
     def _interior_flux(state_pair):
+        normal = actx.thaw(dcoll.normal(state_pair.dd))
         return op.project(dcoll,
             state_pair.dd, dd_allfaces_quad,
-            numerical_flux_func(
-                state_pair, gas_model,
-                state_pair.int.array_context.thaw(dcoll.normal(state_pair.dd))))
+            outlined_num_flux(state_pair, normal))
 
     def _boundary_flux(bdtag, boundary, state_minus_quad):
         dd_bdry_quad = dd_vol_quad.with_domain_tag(bdtag)

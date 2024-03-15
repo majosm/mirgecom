@@ -293,7 +293,7 @@ def viscous_flux(state, grad_cv, grad_t):
 
 
 def viscous_facial_flux_central(dcoll, state_pair, grad_cv_pair, grad_t_pair,
-                                gas_model=None):
+                                normal=None, gas_model=None):
     r"""Return a central facial flux for the divergence operator.
 
     The flux is defined as:
@@ -337,8 +337,10 @@ def viscous_facial_flux_central(dcoll, state_pair, grad_cv_pair, grad_t_pair,
         local to the sub-discretization depending on *local* input parameter
     """
     from mirgecom.flux import num_flux_central
-    actx = state_pair.int.array_context
-    normal = actx.thaw(dcoll.normal(state_pair.dd))
+
+    if normal is None:
+        actx = state_pair.int.array_context
+        normal = actx.thaw(dcoll.normal(state_pair.dd))
 
     f_int = viscous_flux(state_pair.int, grad_cv_pair.int,
                          grad_t_pair.int)
@@ -349,7 +351,7 @@ def viscous_facial_flux_central(dcoll, state_pair, grad_cv_pair, grad_t_pair,
 
 
 def viscous_facial_flux_harmonic(dcoll, state_pair, grad_cv_pair, grad_t_pair,
-                                 gas_model=None):
+                                 normal=None, gas_model=None):
     r"""
     Return a central facial flux w/ harmonic mean coefs for the divergence operator.
 
@@ -400,8 +402,10 @@ def viscous_facial_flux_harmonic(dcoll, state_pair, grad_cv_pair, grad_t_pair,
         local to the sub-discretization depending on *local* input parameter
     """
     from mirgecom.flux import num_flux_central
-    actx = state_pair.int.array_context
-    normal = actx.thaw(dcoll.normal(state_pair.dd))
+
+    if normal is None:
+        actx = state_pair.int.array_context
+        normal = actx.thaw(dcoll.normal(state_pair.dd))
 
     # TODO: Do this for other coefficients too?
     def replace_coefs(state, *, kappa):
@@ -432,7 +436,8 @@ def viscous_flux_on_element_boundary(
         domain_boundary_states, grad_cv, interior_grad_cv_pairs,
         grad_t, interior_grad_t_pairs, quadrature_tag=DISCR_TAG_BASE,
         numerical_flux_func=viscous_facial_flux_central, time=0.0,
-        dd=DD_VOLUME_ALL):
+        dd=DD_VOLUME_ALL,
+        op_tag=None):
     """Compute the viscous boundary fluxes for the divergence operator.
 
     This routine encapsulates the computation of the viscous contributions
@@ -483,6 +488,9 @@ def viscous_flux_on_element_boundary(
     dd: grudge.dof_desc.DOFDesc
         the DOF descriptor of the discretization on which the fluid lives. Must be
         a volume on the base discretization.
+
+    op_tag: Hashable
+        A tag that uniquely identifies this operation in the calling context.
     """
     boundaries = normalize_boundaries(boundaries)
 
@@ -494,16 +502,22 @@ def viscous_flux_on_element_boundary(
     dd_vol = dd
     dd_vol_quad = dd_vol.with_discr_tag(quadrature_tag)
     dd_allfaces_quad = dd_vol_quad.trace(FACE_RESTR_ALL)
+    actx = interior_state_pairs[0].int.array_context
 
     # {{{ - Viscous flux helpers -
 
+    @actx.outlined(id=op_tag)
+    def outlined_num_flux(state_pair, grad_cv_pair, grad_t_pair, normal):
+        return numerical_flux_func(
+            dcoll=None, gas_model=None, state_pair=state_pair,
+            grad_cv_pair=grad_cv_pair, grad_t_pair=grad_t_pair, normal=normal)
+
     # viscous fluxes across interior faces (including partition and periodic bnd)
     def _fvisc_divergence_flux_interior(state_pair, grad_cv_pair, grad_t_pair):
+        normal = actx.thaw(dcoll.normal(state_pair.dd))
         return op.project(dcoll,
             state_pair.dd, dd_allfaces_quad,
-            numerical_flux_func(
-                dcoll=dcoll, gas_model=gas_model, state_pair=state_pair,
-                grad_cv_pair=grad_cv_pair, grad_t_pair=grad_t_pair))
+            outlined_num_flux(state_pair, grad_cv_pair, grad_t_pair, normal))
 
     # viscous part of bcs applied here
     def _fvisc_divergence_flux_boundary(bdtag, boundary, state_minus_quad):

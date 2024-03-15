@@ -99,11 +99,19 @@ from grudge.flux_differencing import volume_flux_differencing
 import grudge.op as op
 
 
-class _ESFluidCVTag():
+class _ESFluidCVTag:
     pass
 
 
-class _ESFluidTemperatureTag():
+class _ESFluidTemperatureTag:
+    pass
+
+
+class _InviscidInteriorFaceFluxTag:
+    pass
+
+
+class _FluidStateTracePairsTag:
     pass
 
 
@@ -271,9 +279,10 @@ def entropy_stable_euler_operator(
 
     # Interior interface state pairs consisting of modified conservative
     # variables and the corresponding temperature seeds
-    interior_states = make_fluid_state_trace_pairs(cv_interior_pairs,
-                                                   gas_model,
-                                                   tseed_interior_pairs)
+    interior_states = make_fluid_state_trace_pairs(
+        cv_interior_pairs, gas_model,
+        tseed_interior_pairs,
+        op_tag=(_FluidStateTracePairsTag, comm_tag))
 
     if inviscid_numerical_flux_func is None:
         inviscid_numerical_flux_func = \
@@ -296,7 +305,7 @@ def entropy_stable_euler_operator(
         dcoll, gas_model, boundaries, interior_states,
         boundary_states, quadrature_tag=quadrature_tag,
         numerical_flux_func=inviscid_numerical_flux_func, time=time,
-        dd=dd_vol)
+        dd=dd_vol, op_tag=(_InviscidInteriorFaceFluxTag, comm_tag))
 
     return op.inverse_mass(
         dcoll,
@@ -405,7 +414,7 @@ def euler_operator(dcoll, state, gas_model, boundaries, time=0.0,
         dcoll, gas_model, boundaries, interior_state_pairs_quad,
         domain_boundary_states_quad, quadrature_tag=quadrature_tag,
         numerical_flux_func=inviscid_numerical_flux_func, time=time,
-        dd=dd_vol)
+        dd=dd_vol, op_tag=(_InviscidInteriorFaceFluxTag, comm_tag))
 
     return -div_operator(dcoll, dd_vol_quad, dd_allfaces_quad,
                          inviscid_flux_vol, inviscid_flux_bnd)

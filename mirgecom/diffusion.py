@@ -537,6 +537,14 @@ class _DiffusionLengthscalesTag:
     pass
 
 
+class _DiffusionGradInteriorFaceFluxTag:
+    pass
+
+
+class _DiffusionInteriorFaceFluxTag:
+    pass
+
+
 def grad_operator(
         dcoll, kappa, boundaries, u, *, quadrature_tag=DISCR_TAG_BASE,
         dd=DD_VOLUME_ALL, comm_tag=None,
@@ -615,6 +623,10 @@ def grad_operator(
 
     interp_to_surf_quad = partial(tracepair_with_discr_tag, dcoll, quadrature_tag)
 
+    @actx.outlined(id=(_DiffusionGradInteriorFaceFluxTag, comm_tag))
+    def outlined_num_flux(kappa_tpair, u_tpair, normal):
+        return numerical_flux_func(kappa_tpair, u_tpair, normal)
+
     def interior_flux(kappa_tpair, u_tpair):
         dd_trace_quad = kappa_tpair.dd.with_discr_tag(quadrature_tag)
         kappa_tpair_quad = interp_to_surf_quad(kappa_tpair)
@@ -622,7 +634,7 @@ def grad_operator(
         normal_quad = actx.thaw(dcoll.normal(dd_trace_quad))
         return op.project(
             dcoll, dd_trace_quad, dd_allfaces_quad,
-            numerical_flux_func(kappa_tpair_quad, u_tpair_quad, normal_quad))
+            outlined_num_flux(kappa_tpair_quad, u_tpair_quad, normal_quad))
 
     def boundary_flux(bdtag, bdry):
         dd_bdry_quad = dd_vol_quad.with_domain_tag(bdtag)
@@ -768,6 +780,17 @@ def diffusion_operator(
 
     interp_to_surf_quad = partial(tracepair_with_discr_tag, dcoll, quadrature_tag)
 
+    @actx.outlined(id=(_DiffusionInteriorFaceFluxTag, comm_tag))
+    def outlined_num_flux(
+            kappa_tpair, u_tpair, grad_u_tpair, lengthscales_tpair, normal):
+        # FIXME (penalty amount)
+        # return diffusion_numerical_flux_func(
+        #     kappa_tpair, u_tpair, grad_u_tpair, lengthscales_tpair, normal,
+        #     penalty_amount=penalty_amount)
+        # print(f"outlined_num_flux: {lengthscales_tpair.int[0].non_equality_tags=}")
+        return diffusion_numerical_flux_func(
+            kappa_tpair, u_tpair, grad_u_tpair, lengthscales_tpair, normal)
+
     def interior_flux(kappa_tpair, u_tpair, grad_u_tpair, lengthscales_tpair):
         dd_trace_quad = u_tpair.dd.with_discr_tag(quadrature_tag)
         u_tpair_quad = interp_to_surf_quad(u_tpair)
@@ -777,10 +800,9 @@ def diffusion_operator(
         normal_quad = actx.thaw(dcoll.normal(dd_trace_quad))
         return op.project(
             dcoll, dd_trace_quad, dd_allfaces_quad,
-            diffusion_numerical_flux_func(
+            outlined_num_flux(
                 kappa_tpair_quad, u_tpair_quad, grad_u_tpair_quad,
-                lengthscales_tpair_quad, normal_quad,
-                penalty_amount=penalty_amount))
+                lengthscales_tpair_quad, normal_quad))
 
     def boundary_flux(bdtag, bdry):
         dd_bdry_quad = dd_vol_quad.with_domain_tag(bdtag)
