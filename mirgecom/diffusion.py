@@ -623,7 +623,7 @@ def grad_operator(
 
     interp_to_surf_quad = partial(tracepair_with_discr_tag, dcoll, quadrature_tag)
 
-    @actx.outlined(id=(_DiffusionGradInteriorFaceFluxTag, comm_tag))
+    @actx.outline
     def outlined_num_flux(kappa_tpair, u_tpair, normal):
         return numerical_flux_func(kappa_tpair, u_tpair, normal)
 
@@ -780,7 +780,7 @@ def diffusion_operator(
 
     interp_to_surf_quad = partial(tracepair_with_discr_tag, dcoll, quadrature_tag)
 
-    @actx.outlined(id=(_DiffusionInteriorFaceFluxTag, comm_tag))
+    @actx.outline
     def outlined_num_flux(
             kappa_tpair, u_tpair, grad_u_tpair, lengthscales_tpair, normal):
         # FIXME (penalty amount)
