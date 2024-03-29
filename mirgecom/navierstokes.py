@@ -139,7 +139,7 @@ def _gradient_flux_interior(dcoll, numerical_flux_func, op_id, tpair):
 
     # FIXME: Can't currently outline this due to the large number of outputs;
     # causes explosion of candidate concatenatabilities in pytato.concatenate_calls
-    # @actx.outlined(id=op_id)
+    @actx.outline
     def outlined_num_flux(tpair, normal):
         return outer(numerical_flux_func(tpair.int, tpair.ext), normal)
 
