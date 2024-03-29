@@ -306,7 +306,8 @@ def make_fluid_state(cv, gas_model,
                      smoothness_d=None,
                      smoothness_beta=None,
                      material_densities=None,
-                     limiter_func=None, limiter_dd=None):
+                     limiter_func=None, limiter_dd=None,
+                     outline=False):
     """Create a fluid state from the conserved vars and physical gas model.
 
     Parameters
@@ -361,6 +362,34 @@ def make_fluid_state(cv, gas_model,
         Thermally consistent fluid state
     """
     actx = cv.array_context
+
+    if outline:
+        @actx.outline
+        def outlined_make_fluid_state(
+                cv,
+                temperature_seed,
+                smoothness_mu,
+                smoothness_kappa,
+                smoothness_d,
+                smoothness_beta,
+                material_densities):
+            return make_fluid_state(
+                cv, gas_model,
+                temperature_seed=temperature_seed,
+                smoothness_mu=smoothness_mu,
+                smoothness_kappa=smoothness_kappa,
+                smoothness_d=smoothness_d,
+                smoothness_beta=smoothness_beta,
+                material_densities=material_densities)
+
+        return outlined_make_fluid_state(
+            cv,
+            temperature_seed=temperature_seed,
+            smoothness_mu=smoothness_mu,
+            smoothness_kappa=smoothness_kappa,
+            smoothness_d=smoothness_d,
+            smoothness_beta=smoothness_beta,
+            material_densities=material_densities)
 
     # FIXME work-around for now
     smoothness_mu = (actx.np.zeros_like(cv.mass) if smoothness_mu
@@ -460,7 +489,7 @@ def make_fluid_state(cv, gas_model,
 
 
 def project_fluid_state(dcoll, src, tgt, state, gas_model, limiter_func=None,
-                        entropy_stable=False):
+                        entropy_stable=False, outline=False):
     """Project a fluid state onto a boundary consistent with the gas model.
 
     If required by the gas model, (e.g. gas is a mixture), this routine will
@@ -512,7 +541,8 @@ def project_fluid_state(dcoll, src, tgt, state, gas_model, limiter_func=None,
     if entropy_stable:
         temp_state = make_fluid_state(cv=cv_sd, gas_model=gas_model,
                                       temperature_seed=temperature_seed,
-                                      limiter_func=limiter_func, limiter_dd=tgt)
+                                      limiter_func=limiter_func, limiter_dd=tgt,
+                                      outline=outline)
         gamma = gas_model.eos.gamma(temp_state.cv, temp_state.temperature)
         ev_sd = conservative_to_entropy_vars(gamma, temp_state)
         cv_sd = entropy_to_conservative_vars(gamma, ev_sd)
@@ -544,7 +574,8 @@ def project_fluid_state(dcoll, src, tgt, state, gas_model, limiter_func=None,
                             smoothness_d=smoothness_d,
                             smoothness_beta=smoothness_beta,
                             material_densities=material_densities,
-                            limiter_func=limiter_func, limiter_dd=tgt)
+                            limiter_func=limiter_func, limiter_dd=tgt,
+                            outline=outline)
 
 
 def _getattr_ish(obj, name):
@@ -625,7 +656,7 @@ def make_fluid_state_trace_pairs(cv_pairs, gas_model,
         # FIXME: Can't currently outline this due to the large number of outputs;
         # causes explosion of candidate concatenatabilities in
         # pytato.concatenate_calls
-        # @actx.outlined(id=op_tag)
+        # @actx.outline
         def outlined_make_fluid_state(
                 cv, temperature_seed,
                 smoothness_mu, smoothness_kappa, smoothness_d, smoothness_beta,
@@ -638,7 +669,8 @@ def make_fluid_state_trace_pairs(cv_pairs, gas_model,
                 smoothness_d=smoothness_d,
                 smoothness_beta=smoothness_beta,
                 material_densities=material_densities,
-                limiter_func=limiter_func, limiter_dd=dd)
+                limiter_func=limiter_func, limiter_dd=dd,
+                outline=True)
 
         return outlined_make_fluid_state(
             cv, temperature_seed,
@@ -822,7 +854,7 @@ def make_operator_fluid_states(
         bdtag: project_fluid_state(
             dcoll, dd_vol, dd_vol_quad.with_domain_tag(bdtag),
             volume_state, gas_model, limiter_func=limiter_func,
-            entropy_stable=entropy_stable)
+            entropy_stable=entropy_stable, outline=True)
         for bdtag in boundaries
     }
 
@@ -906,7 +938,7 @@ def make_operator_fluid_states(
     # (this includes the conserved and dependent quantities)
     volume_state_quad = project_fluid_state(
         dcoll, dd_vol, dd_vol_quad, volume_state, gas_model,
-        limiter_func=limiter_func, entropy_stable=entropy_stable)
+        limiter_func=limiter_func, entropy_stable=entropy_stable, outline=False)
 
     return \
         volume_state_quad, interior_boundary_states_quad, domain_boundary_states_quad
@@ -915,7 +947,7 @@ def make_operator_fluid_states(
 def replace_fluid_state(
         state, gas_model, *, mass=None, energy=None, momentum=None,
         species_mass=None, temperature_seed=None, limiter_func=None,
-        limiter_dd=None):
+        limiter_dd=None, outline=False):
     """Create a new fluid state from an existing one with modified data.
 
     Parameters
@@ -996,11 +1028,13 @@ def replace_fluid_state(
         smoothness_beta=state.smoothness_beta,
         material_densities=material_densities,
         limiter_func=limiter_func,
-        limiter_dd=limiter_dd)
+        limiter_dd=limiter_dd,
+        outline=outline)
 
 
 def make_entropy_projected_fluid_state(
-        discr, dd_vol, dd_faces, state, entropy_vars, gamma, gas_model):
+        discr, dd_vol, dd_faces, state, entropy_vars, gamma, gas_model,
+        outline=False):
     """Projects the entropy vars to target manifold, computes the CV from that."""
     from grudge.interpolation import volume_and_surface_quadrature_interpolation
 
@@ -1021,7 +1055,8 @@ def make_entropy_projected_fluid_state(
 
     return make_fluid_state(cv=cv_modified,
                             gas_model=gas_model,
-                            temperature_seed=temperature_seed)
+                            temperature_seed=temperature_seed,
+                            outline=outline)
 
 
 def conservative_to_entropy_vars(gamma, state):
