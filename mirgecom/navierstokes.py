@@ -137,8 +137,6 @@ def _gradient_flux_interior(dcoll, numerical_flux_func, op_id, tpair):
     dd_allfaces = dd_trace.with_boundary_tag(FACE_RESTR_ALL)
     normal = actx.thaw(dcoll.normal(dd_trace))
 
-    # FIXME: Can't currently outline this due to the large number of outputs;
-    # causes explosion of candidate concatenatabilities in pytato.concatenate_calls
     @actx.outline
     def outlined_num_flux(tpair, normal):
         return outer(numerical_flux_func(tpair.int, tpair.ext), normal)
@@ -505,22 +503,9 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
     # {{{ Local utilities
 
     # transfer trace pairs to quad grid, update pair dd
-    # FIXME
-    # @tagged_with_call_id
-    # @actx.outline
-    def interp_to_surf_quad_grad_cv(tpair):
+    @actx.outline
+    def interp_to_surf_quad(tpair):
         return tracepair_with_discr_tag(dcoll, quadrature_tag, tpair)
-
-    # interp_to_surf_quad_grad_cv = tagged_with_call_id_and(
-    #     comm_tag, interp_to_surf_quad_grad_cv)
-
-    # @tagged_with_call_id
-    # @actx.outline
-    def interp_to_surf_quad_grad_t(tpair):
-        return tracepair_with_discr_tag(dcoll, quadrature_tag, tpair)
-
-    # interp_to_surf_quad_grad_t = tagged_with_call_id_and(
-    #     comm_tag, interp_to_surf_quad_grad_t)
 
     # }}}
 
@@ -538,7 +523,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
     grad_cv_interior_pairs = [
         # Get the interior trace pairs onto the surface quadrature
         # discretization (if any)
-        interp_to_surf_quad_grad_cv(tpair=tpair)
+        interp_to_surf_quad(tpair=tpair)
         for tpair in interior_trace_pairs(
             dcoll, grad_cv, volume_dd=dd_vol, comm_tag=(_NSGradCVTag, comm_tag))
     ]
@@ -559,7 +544,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
     grad_t_interior_pairs = [
         # Get the interior trace pairs onto the surface quadrature
         # discretization (if any)
-        interp_to_surf_quad_grad_t(tpair=tpair)
+        interp_to_surf_quad(tpair=tpair)
         for tpair in interior_trace_pairs(
             dcoll, grad_t, volume_dd=dd_vol,
             comm_tag=(_NSGradTemperatureTag, comm_tag))
