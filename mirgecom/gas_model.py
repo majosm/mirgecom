@@ -53,6 +53,7 @@ from functools import partial
 from dataclasses import dataclass
 from typing import Optional
 import numpy as np  # noqa
+from pytools.obj_array import make_obj_array
 from arraycontext import dataclass_array_container
 from grudge.dof_desc import (
     DD_VOLUME_ALL,
@@ -307,7 +308,7 @@ def make_fluid_state(cv, gas_model,
                      smoothness_beta=None,
                      material_densities=None,
                      limiter_func=None, limiter_dd=None,
-                     outline=True,
+                     outline=False,
                      outline_id=None):
     """Create a fluid state from the conserved vars and physical gas model.
 
@@ -414,85 +415,178 @@ def make_fluid_state(cv, gas_model,
                         is None else smoothness_d)
 
     if isinstance(gas_model, GasModel):
-        temperature = gas_model.eos.temperature(cv=cv,
-                                                temperature_seed=temperature_seed)
-        pressure = gas_model.eos.pressure(cv=cv, temperature=temperature)
+        if outline:
+            @actx.outlined(id=outline_id)
+            def compute_temperature_pressure(cv, temperature_seed):
+                temperature = gas_model.eos.temperature(
+                    cv=cv, temperature_seed=temperature_seed)
+                pressure = gas_model.eos.pressure(cv=cv, temperature=temperature)
+                return make_obj_array([temperature, pressure])
+        else:
+            def compute_temperature_pressure(cv, temperature_seed):
+                temperature = gas_model.eos.temperature(
+                    cv=cv, temperature_seed=temperature_seed)
+                pressure = gas_model.eos.pressure(cv=cv, temperature=temperature)
+                return make_obj_array([temperature, pressure])
+
+        # if outline:
+        #     compute_temperature_pressure = actx.outline(
+        #         compute_temperature_pressure, id=outline_id)
+
+        temperature, pressure = compute_temperature_pressure(cv, temperature_seed)
 
         if limiter_func:
             cv = limiter_func(cv=cv, pressure=pressure, temperature=temperature,
                               dd=limiter_dd)
 
-        dv = GasDependentVars(
-            temperature=temperature,
-            pressure=pressure,
-            speed_of_sound=gas_model.eos.sound_speed(cv, temperature),
-            smoothness_mu=smoothness_mu,
-            smoothness_kappa=smoothness_kappa,
-            smoothness_d=smoothness_d,
-            smoothness_beta=smoothness_beta
-        )
+        if outline:
+            @actx.outlined(id=outline_id)
+            def compute_dv_tv(
+                    cv, temperature, pressure, smoothness_mu, smoothness_kappa,
+                    smoothness_d, smoothness_beta):
+                dv = GasDependentVars(
+                    temperature=temperature,
+                    pressure=pressure,
+                    speed_of_sound=gas_model.eos.sound_speed(cv, temperature),
+                    smoothness_mu=smoothness_mu,
+                    smoothness_kappa=smoothness_kappa,
+                    smoothness_d=smoothness_d,
+                    smoothness_beta=smoothness_beta
+                )
 
-        from mirgecom.eos import MixtureEOS
-        if isinstance(gas_model.eos, MixtureEOS):
-            dv = MixtureDependentVars(
-                temperature=dv.temperature,
-                pressure=dv.pressure,
-                speed_of_sound=dv.speed_of_sound,
-                smoothness_mu=dv.smoothness_mu,
-                smoothness_kappa=dv.smoothness_kappa,
-                smoothness_d=dv.smoothness_d,
-                smoothness_beta=dv.smoothness_beta,
-                species_enthalpies=gas_model.eos.species_enthalpies(cv, temperature)
-            )
+                from mirgecom.eos import MixtureEOS
+                if isinstance(gas_model.eos, MixtureEOS):
+                    dv = MixtureDependentVars(
+                        temperature=dv.temperature,
+                        pressure=dv.pressure,
+                        speed_of_sound=dv.speed_of_sound,
+                        smoothness_mu=dv.smoothness_mu,
+                        smoothness_kappa=dv.smoothness_kappa,
+                        smoothness_d=dv.smoothness_d,
+                        smoothness_beta=dv.smoothness_beta,
+                        species_enthalpies=gas_model.eos.species_enthalpies(
+                            cv, temperature)
+                    )
+
+                if gas_model.transport is not None:
+                    tv = gas_model.transport.transport_vars(
+                        cv=cv, dv=dv, eos=gas_model.eos)
+                    return make_obj_array([dv, tv])
+                else:
+                    return make_obj_array([dv])
+        else:
+            def compute_dv_tv(
+                    cv, temperature, pressure, smoothness_mu, smoothness_kappa,
+                    smoothness_d, smoothness_beta):
+                dv = GasDependentVars(
+                    temperature=temperature,
+                    pressure=pressure,
+                    speed_of_sound=gas_model.eos.sound_speed(cv, temperature),
+                    smoothness_mu=smoothness_mu,
+                    smoothness_kappa=smoothness_kappa,
+                    smoothness_d=smoothness_d,
+                    smoothness_beta=smoothness_beta
+                )
+
+                from mirgecom.eos import MixtureEOS
+                if isinstance(gas_model.eos, MixtureEOS):
+                    dv = MixtureDependentVars(
+                        temperature=dv.temperature,
+                        pressure=dv.pressure,
+                        speed_of_sound=dv.speed_of_sound,
+                        smoothness_mu=dv.smoothness_mu,
+                        smoothness_kappa=dv.smoothness_kappa,
+                        smoothness_d=dv.smoothness_d,
+                        smoothness_beta=dv.smoothness_beta,
+                        species_enthalpies=gas_model.eos.species_enthalpies(
+                            cv, temperature)
+                    )
+
+                if gas_model.transport is not None:
+                    tv = gas_model.transport.transport_vars(
+                        cv=cv, dv=dv, eos=gas_model.eos)
+                    return make_obj_array([dv, tv])
+                else:
+                    return make_obj_array([dv])
+
+        # if outline:
+        #     compute_dv_tv = actx.outline(compute_dv_tv, id=outline_id)
+
+        dv_tv = compute_dv_tv(cv, temperature, pressure, smoothness_mu,
+            smoothness_kappa, smoothness_d, smoothness_beta)
 
         if gas_model.transport is not None:
-            tv = gas_model.transport.transport_vars(cv=cv, dv=dv, eos=gas_model.eos)
+            dv, tv = dv_tv
             return ViscousFluidState(cv=cv, dv=dv, tv=tv)
-
-        return FluidState(cv=cv, dv=dv)
+        else:
+            dv, = dv_tv
+            return FluidState(cv=cv, dv=dv)
 
     # TODO ideally, we want to avoid using "gas model" because the name contradicts
     # its usage with solid+fluid.
     elif isinstance(gas_model, PorousFlowModel):
+        def compute_wv_temperature_pressure(
+                cv, material_densities, temperature_seed):
 
-        # FIXME per previous review, think of a way to de-couple wall and fluid.
-        # ~~~ we need to squeeze wall_eos in gas_model because this is easily
-        # accessible everywhere in the code
+            # FIXME per previous review, think of a way to de-couple wall and fluid.
+            # ~~~ we need to squeeze wall_eos in gas_model because this is easily
+            # accessible everywhere in the code
 
-        tau = gas_model.decomposition_progress(material_densities)
-        wv = PorousWallVars(
-            material_densities=material_densities,
-            tau=tau,
-            density=gas_model.solid_density(material_densities),
-            void_fraction=gas_model.wall_eos.void_fraction(tau=tau),
-            # FIXME emissivity as a function of temperature...
-            emissivity=gas_model.wall_eos.emissivity(tau=tau),
-            permeability=gas_model.wall_eos.permeability(tau=tau),
-            tortuosity=gas_model.wall_eos.tortuosity(tau=tau)
-        )
+            tau = gas_model.decomposition_progress(material_densities)
+            wv = PorousWallVars(
+                material_densities=material_densities,
+                tau=tau,
+                density=gas_model.solid_density(material_densities),
+                void_fraction=gas_model.wall_eos.void_fraction(tau=tau),
+                # FIXME emissivity as a function of temperature...
+                emissivity=gas_model.wall_eos.emissivity(tau=tau),
+                permeability=gas_model.wall_eos.permeability(tau=tau),
+                tortuosity=gas_model.wall_eos.tortuosity(tau=tau)
+            )
 
-        temperature = gas_model.get_temperature(cv=cv, wv=wv,
-            tseed=temperature_seed)
+            temperature = gas_model.get_temperature(cv=cv, wv=wv,
+                tseed=temperature_seed)
 
-        pressure = gas_model.get_pressure(cv, wv, temperature)
+            pressure = gas_model.get_pressure(cv, wv, temperature)
+
+            return make_obj_array([wv, temperature, pressure])
+
+        if outline:
+            compute_wv_temperature_pressure = actx.outline(
+                compute_wv_temperature_pressure, id=outline_id)
+
+        wv, temperature_pressure = compute_wv_temperature_pressure(
+            cv, material_densities, temperature_seed)
 
         if limiter_func:
             cv = limiter_func(cv=cv, wv=wv, pressure=pressure,
                               temperature=temperature, dd=limiter_dd)
 
-        dv = MixtureDependentVars(
-            temperature=temperature,
-            pressure=pressure,
-            speed_of_sound=gas_model.eos.sound_speed(cv, temperature),
-            smoothness_mu=smoothness_mu,
-            smoothness_kappa=smoothness_kappa,
-            smoothness_d=smoothness_d,
-            smoothness_beta=smoothness_beta,
-            species_enthalpies=gas_model.eos.species_enthalpies(cv, temperature),
-        )
+        def compute_dv_tv(
+                cv, temperature, pressure, smoothness_mu, smoothness_kappa,
+                smoothness_d, smoothness_beta):
+            dv = MixtureDependentVars(
+                temperature=temperature,
+                pressure=pressure,
+                speed_of_sound=gas_model.eos.sound_speed(cv, temperature),
+                smoothness_mu=smoothness_mu,
+                smoothness_kappa=smoothness_kappa,
+                smoothness_d=smoothness_d,
+                smoothness_beta=smoothness_beta,
+                species_enthalpies=gas_model.eos.species_enthalpies(cv, temperature),
+            )
 
-        tv = gas_model.transport.transport_vars(cv=cv, dv=dv, wv=wv,
-            eos=gas_model.eos, wall_eos=gas_model.wall_eos)
+            tv = gas_model.transport.transport_vars(cv=cv, dv=dv, wv=wv,
+                eos=gas_model.eos, wall_eos=gas_model.wall_eos)
+
+            return make_obj_array([dv, tv])
+
+        if outline:
+            compute_dv_tv = actx.outline(compute_dv_tv, id=outline_id)
+
+        dv, tv = compute_dv_tv(
+            cv, temperature, pressure, smoothness_mu, smoothness_kappa, smoothness_d,
+            smoothness_beta)
 
         return PorousFlowFluidState(cv=cv, dv=dv, tv=tv, wv=wv)
 
@@ -500,9 +594,10 @@ def make_fluid_state(cv, gas_model,
         raise TypeError("Invalid type for gas_model")
 
 
-def project_fluid_state(dcoll, src, tgt, state, gas_model,
-                        make_fluid_state_func=make_fluid_state, limiter_func=None,
-                        entropy_stable=False):
+def project_fluid_state(
+        dcoll, src, tgt, state, gas_model,
+        make_fluid_state_func=partial(make_fluid_state, outline=True),
+        limiter_func=None, entropy_stable=False):
     """Project a fluid state onto a boundary consistent with the gas model.
 
     If required by the gas model, (e.g. gas is a mixture), this routine will
@@ -609,7 +704,7 @@ def make_fluid_state_trace_pairs(cv_pairs, gas_model,
                                  smoothness_d_pairs=None,
                                  smoothness_beta_pairs=None,
                                  material_densities_pairs=None,
-                                 make_fluid_state_func=make_fluid_state,
+                                 make_fluid_state_func=partial(make_fluid_state, outline=True),
                                  limiter_func=None,
                                  *,
                                  op_tag=None):
@@ -911,7 +1006,7 @@ def make_operator_fluid_states(
 def replace_fluid_state(
         state, gas_model, *, mass=None, energy=None, momentum=None,
         species_mass=None, temperature_seed=None, limiter_func=None,
-        limiter_dd=None, outline=True, outline_id=None):
+        limiter_dd=None, outline=False, outline_id=None):
     """Create a new fluid state from an existing one with modified data.
 
     Parameters
