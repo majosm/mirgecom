@@ -373,36 +373,36 @@ def make_fluid_state(cv, gas_model,
     """
     actx = cv.array_context
 
-    if outline:
-        @actx.outlined(id=outline_id)
-        def outlined_make_fluid_state(
-                cv,
-                temperature_seed,
-                smoothness_mu,
-                smoothness_kappa,
-                smoothness_d,
-                smoothness_beta,
-                material_densities):
-            return make_fluid_state(
-                cv, gas_model,
-                temperature_seed=temperature_seed,
-                smoothness_mu=smoothness_mu,
-                smoothness_kappa=smoothness_kappa,
-                smoothness_d=smoothness_d,
-                smoothness_beta=smoothness_beta,
-                material_densities=material_densities,
-                # limiter_func=limiter_func,
-                # limiter_dd=limiter_dd,
-                outline=False)
+    # if outline:
+    #     @actx.outlined(id=outline_id)
+    #     def outlined_make_fluid_state(
+    #             cv,
+    #             temperature_seed,
+    #             smoothness_mu,
+    #             smoothness_kappa,
+    #             smoothness_d,
+    #             smoothness_beta,
+    #             material_densities):
+    #         return make_fluid_state(
+    #             cv, gas_model,
+    #             temperature_seed=temperature_seed,
+    #             smoothness_mu=smoothness_mu,
+    #             smoothness_kappa=smoothness_kappa,
+    #             smoothness_d=smoothness_d,
+    #             smoothness_beta=smoothness_beta,
+    #             material_densities=material_densities,
+    #             limiter_func=limiter_func,
+    #             limiter_dd=limiter_dd,
+    #             outline=False)
 
-        return outlined_make_fluid_state(
-            cv,
-            temperature_seed=temperature_seed,
-            smoothness_mu=smoothness_mu,
-            smoothness_kappa=smoothness_kappa,
-            smoothness_d=smoothness_d,
-            smoothness_beta=smoothness_beta,
-            material_densities=material_densities)
+    #     return outlined_make_fluid_state(
+    #         cv,
+    #         temperature_seed=temperature_seed,
+    #         smoothness_mu=smoothness_mu,
+    #         smoothness_kappa=smoothness_kappa,
+    #         smoothness_d=smoothness_d,
+    #         smoothness_beta=smoothness_beta,
+    #         material_densities=material_densities)
 
     # FIXME work-around for now
     smoothness_mu = (actx.np.zeros_like(cv.mass) if smoothness_mu
