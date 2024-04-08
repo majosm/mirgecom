@@ -165,6 +165,9 @@ def main(actx_class, rst_filename=None,
     from mirgecom.simutil import global_reduce as _global_reduce
     global_reduce = partial(_global_reduce, comm=comm)
 
+    from pytato.array import set_traceback_tag_enabled
+    set_traceback_tag_enabled(True)
+
     # {{{ Some discretization parameters
 
     dim = 2
