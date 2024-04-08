@@ -300,7 +300,7 @@ def inviscid_flux_on_element_boundary(
     dd_allfaces_quad = dd_vol_quad.trace(FACE_RESTR_ALL)
     actx = interior_state_pairs[0].int.array_context
 
-    @actx.outline
+    # @actx.outline
     def outlined_num_flux(state_pair, normal):
         return numerical_flux_func(state_pair, gas_model, normal)
 
