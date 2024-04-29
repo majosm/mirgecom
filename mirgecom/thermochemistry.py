@@ -137,10 +137,19 @@ def get_pyrometheus_wrapper_class(pyro_class, temperature_niter=5, zero_level=0.
             # if thermally perfect gas
             t_i = temperature_guess
             for _ in range(num_iter):
-                t_i = t_i + self.get_temperature_update_energy(
+                t_update = self.get_temperature_update_energy(
                     energy, t_i, species_mass_fractions
                 )
+                import pytato as pt
+                from meshmode.dof_array import DOFArray
+                t_update = DOFArray(
+                    t_update.array_context,
+                    data=tuple(
+                        ary.tagged(pt.tags.ImplStored())
+                        for ary in t_update))
+                t_i = t_i + t_update
             return t_i
+
 
         # Compute heat release rate due to chemistry.
         # Only used for visualization/post-processing.
