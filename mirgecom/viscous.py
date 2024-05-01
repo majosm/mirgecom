@@ -506,7 +506,7 @@ def viscous_flux_on_element_boundary(
 
     # {{{ - Viscous flux helpers -
 
-    # @actx.outline
+    @actx.outline
     def outlined_num_flux(state_pair, grad_cv_pair, grad_t_pair, normal):
         return numerical_flux_func(
             dcoll=None, gas_model=None, state_pair=state_pair,

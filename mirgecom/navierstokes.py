@@ -137,7 +137,7 @@ def _gradient_flux_interior(dcoll, numerical_flux_func, op_id, tpair):
     dd_allfaces = dd_trace.with_boundary_tag(FACE_RESTR_ALL)
     normal = actx.thaw(dcoll.normal(dd_trace))
 
-    # @actx.outline
+    @actx.outline
     def outlined_num_flux(tpair, normal):
         return outer(numerical_flux_func(tpair.int, tpair.ext), normal)
 
@@ -503,7 +503,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
     # {{{ Local utilities
 
     # transfer trace pairs to quad grid, update pair dd
-    # @actx.outline
+    @actx.outline
     def interp_to_surf_quad(tpair):
         return tracepair_with_discr_tag(dcoll, quadrature_tag, tpair)
 

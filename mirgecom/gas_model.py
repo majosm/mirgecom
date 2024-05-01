@@ -416,7 +416,7 @@ def make_fluid_state(cv, gas_model,
 
     if isinstance(gas_model, GasModel):
         if outline:
-            # @actx.outlined(id=outline_id)
+            @actx.outlined(id=outline_id)
             def compute_temperature_pressure(cv, temperature_seed):
                 temperature = gas_model.eos.temperature(
                     cv=cv, temperature_seed=temperature_seed)
@@ -440,7 +440,7 @@ def make_fluid_state(cv, gas_model,
                               dd=limiter_dd)
 
         if outline:
-            # @actx.outlined(id=outline_id)
+            @actx.outlined(id=outline_id)
             def compute_dv_tv(
                     cv, temperature, pressure, smoothness_mu, smoothness_kappa,
                     smoothness_d, smoothness_beta):
@@ -553,9 +553,9 @@ def make_fluid_state(cv, gas_model,
 
             return make_obj_array([wv, temperature, pressure])
 
-        # if outline:
-        #     compute_wv_temperature_pressure = actx.outline(
-        #         compute_wv_temperature_pressure, id=outline_id)
+        if outline:
+            compute_wv_temperature_pressure = actx.outline(
+                compute_wv_temperature_pressure, id=outline_id)
 
         wv, temperature_pressure = compute_wv_temperature_pressure(
             cv, material_densities, temperature_seed)
@@ -583,8 +583,8 @@ def make_fluid_state(cv, gas_model,
 
             return make_obj_array([dv, tv])
 
-        # if outline:
-        #     compute_dv_tv = actx.outline(compute_dv_tv, id=outline_id)
+        if outline:
+            compute_dv_tv = actx.outline(compute_dv_tv, id=outline_id)
 
         dv, tv = compute_dv_tv(
             cv, temperature, pressure, smoothness_mu, smoothness_kappa, smoothness_d,
@@ -903,7 +903,7 @@ def make_operator_fluid_states(
     actx = volume_state.array_context
 
     # project pair to the quadrature discretization and update dd to quad
-    # @actx.outline
+    @actx.outline
     def interp_to_surf_quad(tpair):
         return tracepair_with_discr_tag(dcoll, quadrature_tag, tpair)
 
