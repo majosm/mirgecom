@@ -557,8 +557,7 @@ def make_fluid_state(cv, gas_model,
 
 
 def project_fluid_state(
-        dcoll, src, tgt, state, gas_model,
-        make_fluid_state_func=partial(make_fluid_state, outline=True),
+        dcoll, src, tgt, state, gas_model, make_fluid_state_func=None,
         limiter_func=None, entropy_stable=False):
     """Project a fluid state onto a boundary consistent with the gas model.
 
@@ -606,6 +605,8 @@ def project_fluid_state(
 
         Thermally consistent fluid state
     """
+    if make_fluid_state_func is None:
+        make_fluid_state_func = partial(make_fluid_state, outline=True)
 
     cv_sd = op.project(dcoll, src, tgt, state.cv)
 
@@ -666,7 +667,7 @@ def make_fluid_state_trace_pairs(cv_pairs, gas_model,
                                  smoothness_d_pairs=None,
                                  smoothness_beta_pairs=None,
                                  material_densities_pairs=None,
-                                 make_fluid_state_func=partial(make_fluid_state, outline=True),
+                                 make_fluid_state_func=None,
                                  limiter_func=None):
     """Create a fluid state from the conserved vars and equation of state.
 
@@ -719,6 +720,9 @@ def make_fluid_state_trace_pairs(cv_pairs, gas_model,
         smoothness_beta_pairs = [None] * len(cv_pairs)
     if material_densities_pairs is None:
         material_densities_pairs = [None] * len(cv_pairs)
+
+    if make_fluid_state_func is None:
+        make_fluid_state_func = partial(make_fluid_state, outline=True)
 
     return [TracePair(
         cv_pair.dd,
