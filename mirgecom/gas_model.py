@@ -944,11 +944,6 @@ def make_operator_fluid_states(
         smoothness_d_pairs=smoothness_d_interior_pairs,
         smoothness_beta_pairs=smoothness_beta_interior_pairs,
         material_densities_pairs=material_densities_interior_pairs,
-        # Assign a different ID to make_fluid_state calls that depend on MPI
-        # communication, to prevent the array context from applying transformations
-        # such as concatenation that have the potential to introduce new
-        # communication dependencies and slow down the code.
-        # make_fluid_state_func=partial(make_fluid_state, outline_id=comm_tag),
         limiter_func=limiter_func)
 
     # Interpolate the fluid state to the volume quadrature grid
