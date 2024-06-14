@@ -98,27 +98,11 @@ from mirgecom.gas_model import make_operator_fluid_states
 from mirgecom.utils import normalize_boundaries, force_materialize
 
 
-class _GradCVInteriorFaceFluxTag:
-    pass
-
-
-class _GradTemperatureInteriorFaceFluxTag:
-    pass
-
-
 class _NSGradCVTag:
     pass
 
 
 class _NSGradTemperatureTag:
-    pass
-
-
-class _InviscidInteriorFaceFluxTag:
-    pass
-
-
-class _ViscousInteriorFaceFluxTag:
     pass
 
 
@@ -129,7 +113,7 @@ class _ESFluidCVTag:
 class _ESFluidTemperatureTag:
     pass
 
-def _gradient_flux_interior(dcoll, numerical_flux_func, op_id, tpair):
+def _gradient_flux_interior(dcoll, numerical_flux_func, tpair):
     """Compute interior face flux for gradient operator."""
     from arraycontext import outer
     actx = tpair.int.array_context
@@ -222,8 +206,7 @@ def grad_cv_operator(
         operator_states_quad
 
     get_interior_flux = partial(
-        _gradient_flux_interior, dcoll, numerical_flux_func,
-        (_GradCVInteriorFaceFluxTag, comm_tag))
+        _gradient_flux_interior, dcoll, numerical_flux_func)
 
     cv_interior_pairs = [TracePair(state_pair.dd,
                                    interior=state_pair.int.cv,
@@ -330,8 +313,7 @@ def grad_t_operator(
         operator_states_quad
 
     get_interior_flux = partial(
-        _gradient_flux_interior, dcoll, numerical_flux_func,
-        (_GradTemperatureInteriorFaceFluxTag, comm_tag))
+        _gradient_flux_interior, dcoll, numerical_flux_func)
 
     # Temperature gradient for conductive heat flux: [Ihme_2014]_ eqn (4c)
     # Capture the temperature for the interior faces for grad(T) calc
@@ -569,7 +551,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
         domain_bnd_states_quad, grad_cv, grad_cv_interior_pairs,
         grad_t, grad_t_interior_pairs, quadrature_tag=quadrature_tag,
         numerical_flux_func=viscous_numerical_flux_func, time=time,
-        dd=dd_vol, op_tag=(_ViscousInteriorFaceFluxTag, comm_tag))
+        dd=dd_vol)
     bnd_term = force_materialize(actx, bnd_term)
 
     # Add corresponding inviscid parts if enabled
@@ -583,7 +565,7 @@ def ns_operator(dcoll, gas_model, state, boundaries, *, time=0.0,
                 dcoll, gas_model, boundaries, inter_elem_bnd_states_quad,
                 domain_bnd_states_quad, quadrature_tag=quadrature_tag,
                 numerical_flux_func=inviscid_numerical_flux_func, time=time,
-                dd=dd_vol, op_tag=(_InviscidInteriorFaceFluxTag, comm_tag))
+                dd=dd_vol)
         bnd_term = force_materialize(actx, bnd_term)
 
     ns_rhs = div_operator(dcoll, dd_vol_quad, dd_allfaces_quad, vol_term, bnd_term)

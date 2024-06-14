@@ -537,14 +537,6 @@ class _DiffusionLengthscalesTag:
     pass
 
 
-class _DiffusionGradInteriorFaceFluxTag:
-    pass
-
-
-class _DiffusionInteriorFaceFluxTag:
-    pass
-
-
 def grad_operator(
         dcoll, kappa, boundaries, u, *, quadrature_tag=DISCR_TAG_BASE,
         dd=DD_VOLUME_ALL, comm_tag=None,

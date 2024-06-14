@@ -709,9 +709,7 @@ def make_fluid_state_trace_pairs(cv_pairs, gas_model,
                                  smoothness_beta_pairs=None,
                                  material_densities_pairs=None,
                                  make_fluid_state_func=partial(make_fluid_state, outline=True),
-                                 limiter_func=None,
-                                 *,
-                                 op_tag=None):
+                                 limiter_func=None):
     """Create a fluid state from the conserved vars and equation of state.
 
     This routine helps create a thermally consistent fluid state out of a collection
@@ -823,10 +821,6 @@ class _FluidSmoothnessBetaTag:
 
 
 class _WallDensityTag:
-    pass
-
-
-class _FluidStateTracePairsTag:
     pass
 
 

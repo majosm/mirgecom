@@ -243,8 +243,7 @@ def inviscid_flux_on_element_boundary(
         dcoll, gas_model, boundaries, interior_state_pairs,
         domain_boundary_states, quadrature_tag=DISCR_TAG_BASE,
         numerical_flux_func=inviscid_facial_flux_rusanov, time=0.0,
-        dd=DD_VOLUME_ALL,
-        op_tag=None):
+        dd=DD_VOLUME_ALL):
     """Compute the inviscid boundary fluxes for the divergence operator.
 
     This routine encapsulates the computation of the inviscid contributions
@@ -284,9 +283,6 @@ def inviscid_flux_on_element_boundary(
     dd: grudge.dof_desc.DOFDesc
         the DOF descriptor of the discretization on which the fluid lives. Must be
         a volume on the base discretization.
-
-    op_tag: Hashable
-        A tag that uniquely identifies this operation in the calling context.
     """
     boundaries = normalize_boundaries(boundaries)
 

@@ -436,8 +436,7 @@ def viscous_flux_on_element_boundary(
         domain_boundary_states, grad_cv, interior_grad_cv_pairs,
         grad_t, interior_grad_t_pairs, quadrature_tag=DISCR_TAG_BASE,
         numerical_flux_func=viscous_facial_flux_central, time=0.0,
-        dd=DD_VOLUME_ALL,
-        op_tag=None):
+        dd=DD_VOLUME_ALL):
     """Compute the viscous boundary fluxes for the divergence operator.
 
     This routine encapsulates the computation of the viscous contributions
@@ -488,9 +487,6 @@ def viscous_flux_on_element_boundary(
     dd: grudge.dof_desc.DOFDesc
         the DOF descriptor of the discretization on which the fluid lives. Must be
         a volume on the base discretization.
-
-    op_tag: Hashable
-        A tag that uniquely identifies this operation in the calling context.
     """
     boundaries = normalize_boundaries(boundaries)
 
