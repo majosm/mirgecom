@@ -122,10 +122,10 @@ def _gradient_flux_interior(dcoll, numerical_flux_func, tpair):
     normal = actx.thaw(dcoll.normal(dd_trace))
 
     @actx.outline
-    def outlined_num_flux(tpair, normal):
+    def outlined_num_flux_ns_grad(tpair, normal):
         return outer(numerical_flux_func(tpair.int, tpair.ext), normal)
 
-    return op.project(dcoll, dd_trace, dd_allfaces, outlined_num_flux(tpair, normal))
+    return op.project(dcoll, dd_trace, dd_allfaces, outlined_num_flux_ns_grad(tpair, normal))
 
 
 def grad_cv_operator(

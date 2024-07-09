@@ -297,14 +297,14 @@ def inviscid_flux_on_element_boundary(
     actx = interior_state_pairs[0].int.array_context
 
     @actx.outline
-    def outlined_num_flux(state_pair, normal):
+    def outlined_num_flux_inv(state_pair, normal):
         return numerical_flux_func(state_pair, gas_model, normal)
 
     def _interior_flux(state_pair):
         normal = actx.thaw(dcoll.normal(state_pair.dd))
         return op.project(dcoll,
             state_pair.dd, dd_allfaces_quad,
-            outlined_num_flux(state_pair, normal))
+            outlined_num_flux_inv(state_pair, normal))
 
     def _boundary_flux(bdtag, boundary, state_minus_quad):
         dd_bdry_quad = dd_vol_quad.with_domain_tag(bdtag)
