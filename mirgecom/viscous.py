@@ -503,7 +503,7 @@ def viscous_flux_on_element_boundary(
     # {{{ - Viscous flux helpers -
 
     @actx.outline
-    def outlined_num_flux_visc(state_pair, grad_cv_pair, grad_t_pair, normal):
+    def outlined_num_flux(state_pair, grad_cv_pair, grad_t_pair, normal):
         return numerical_flux_func(
             dcoll=None, gas_model=None, state_pair=state_pair,
             grad_cv_pair=grad_cv_pair, grad_t_pair=grad_t_pair, normal=normal)
@@ -513,7 +513,7 @@ def viscous_flux_on_element_boundary(
         normal = actx.thaw(dcoll.normal(state_pair.dd))
         return op.project(dcoll,
             state_pair.dd, dd_allfaces_quad,
-            outlined_num_flux_visc(state_pair, grad_cv_pair, grad_t_pair, normal))
+            outlined_num_flux(state_pair, grad_cv_pair, grad_t_pair, normal))
 
     # viscous part of bcs applied here
     def _fvisc_divergence_flux_boundary(bdtag, boundary, state_minus_quad):
