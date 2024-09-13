@@ -544,7 +544,7 @@ def make_fluid_state(cv, gas_model,
             cv = apply_limiter(cv, wv, pressure, temperature)
 
         def compute_dv_tv(
-                cv, temperature, pressure, smoothness_mu, smoothness_kappa,
+                cv, wv, temperature, pressure, smoothness_mu, smoothness_kappa,
                 smoothness_d, smoothness_beta):
             dv = MixtureDependentVars(
                 temperature=temperature,
@@ -566,8 +566,8 @@ def make_fluid_state(cv, gas_model,
             compute_dv_tv = actx.outline(compute_dv_tv, id=outline_id)
 
         dv, tv = compute_dv_tv(
-            cv, temperature, pressure, smoothness_mu, smoothness_kappa, smoothness_d,
-            smoothness_beta)
+            cv, wv, temperature, pressure, smoothness_mu, smoothness_kappa,
+            smoothness_d, smoothness_beta)
 
         return force_materialize(
             actx,
