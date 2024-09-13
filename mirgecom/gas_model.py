@@ -533,8 +533,15 @@ def make_fluid_state(cv, gas_model,
             cv, material_densities, temperature_seed)
 
         if limiter_func:
-            cv = limiter_func(cv=cv, wv=wv, pressure=pressure,
-                              temperature=temperature, dd=limiter_dd)
+            def apply_limiter(cv, wv, pressure, temperature):
+                return limiter_func(
+                    cv=cv, wv=wv, pressure=pressure, temperature=temperature,
+                    dd=limiter_dd)
+
+            if outline:
+                apply_limiter = actx.outline(apply_limiter, id=outline_id)
+
+            cv = apply_limiter(cv, wv, pressure, temperature)
 
         def compute_dv_tv(
                 cv, temperature, pressure, smoothness_mu, smoothness_kappa,
