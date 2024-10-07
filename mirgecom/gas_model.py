@@ -426,8 +426,8 @@ def make_fluid_state(cv, gas_model,
                     cv=cv, temperature_seed=temperature_seed,
                     gas_model=gas_model, dd=limiter_dd)
 
-            # if outline:
-            #     apply_limiter = actx.outline(apply_limiter, id=outline_id)
+            if outline:
+                apply_limiter = actx.outline(apply_limiter, id=outline_id)
 
             rv = apply_limiter(cv, temperature_seed)
 
@@ -443,9 +443,9 @@ def make_fluid_state(cv, gas_model,
                 pressure = gas_model.eos.pressure(cv=cv, temperature=temperature)
                 return make_obj_array([temperature, pressure])
 
-            # if outline:
-            #     compute_temperature_pressure = actx.outline(
-            #         compute_temperature_pressure, id=outline_id)
+            if outline:
+                compute_temperature_pressure = actx.outline(
+                    compute_temperature_pressure, id=outline_id)
 
             temperature, pressure = compute_temperature_pressure(cv, temperature_seed)
 
@@ -483,8 +483,8 @@ def make_fluid_state(cv, gas_model,
             else:
                 return make_obj_array([dv])
 
-        # if outline:
-        #     compute_dv_tv = actx.outline(compute_dv_tv, id=outline_id)
+        if outline:
+            compute_dv_tv = actx.outline(compute_dv_tv, id=outline_id)
 
         dv_tv = compute_dv_tv(cv, temperature, pressure, smoothness_mu,
             smoothness_kappa, smoothness_d, smoothness_beta)
@@ -525,9 +525,9 @@ def make_fluid_state(cv, gas_model,
 
             return make_obj_array([wv, temperature, pressure])
 
-        # if outline:
-        #     compute_wv_temperature_pressure = actx.outline(
-        #         compute_wv_temperature_pressure, id=outline_id)
+        if outline:
+            compute_wv_temperature_pressure = actx.outline(
+                compute_wv_temperature_pressure, id=outline_id)
 
         wv, temperature, pressure = compute_wv_temperature_pressure(
             cv, material_densities, temperature_seed)
@@ -538,8 +538,8 @@ def make_fluid_state(cv, gas_model,
                     cv=cv, wv=wv, pressure=pressure, temperature=temperature,
                     dd=limiter_dd)
 
-            # if outline:
-            #     apply_limiter = actx.outline(apply_limiter, id=outline_id)
+            if outline:
+                apply_limiter = actx.outline(apply_limiter, id=outline_id)
 
             cv = apply_limiter(cv, wv, pressure, temperature)
 
@@ -562,8 +562,8 @@ def make_fluid_state(cv, gas_model,
 
             return make_obj_array([dv, tv])
 
-        # if outline:
-        #     compute_dv_tv = actx.outline(compute_dv_tv, id=outline_id)
+        if outline:
+            compute_dv_tv = actx.outline(compute_dv_tv, id=outline_id)
 
         dv, tv = compute_dv_tv(
             cv, wv, temperature, pressure, smoothness_mu, smoothness_kappa,
