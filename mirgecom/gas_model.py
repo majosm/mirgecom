@@ -309,7 +309,8 @@ def make_fluid_state(cv, gas_model,
                      material_densities=None,
                      limiter_func=None, limiter_dd=None,
                      outline=False,
-                     outline_id=None):
+                     outline_id=None,
+                     _force_materialize=True):
     """Create a fluid state from the conserved vars and physical gas model.
 
     Parameters
@@ -373,38 +374,41 @@ def make_fluid_state(cv, gas_model,
     """
     actx = cv.array_context
 
-    # if outline:
-    #     outlined = partial(actx.outline, id=outline_id)
-    #
-    #     @outlined
-    #     def outlined_make_fluid_state(
-    #             cv,
-    #             temperature_seed,
-    #             smoothness_mu,
-    #             smoothness_kappa,
-    #             smoothness_d,
-    #             smoothness_beta,
-    #             material_densities):
-    #         return make_fluid_state(
-    #             cv, gas_model,
-    #             temperature_seed=temperature_seed,
-    #             smoothness_mu=smoothness_mu,
-    #             smoothness_kappa=smoothness_kappa,
-    #             smoothness_d=smoothness_d,
-    #             smoothness_beta=smoothness_beta,
-    #             material_densities=material_densities,
-    #             limiter_func=limiter_func,
-    #             limiter_dd=limiter_dd,
-    #             outline=False)
+    if outline:
+        def _make_fluid_state(
+                cv,
+                temperature_seed,
+                smoothness_mu,
+                smoothness_kappa,
+                smoothness_d,
+                smoothness_beta,
+                material_densities):
+            return make_fluid_state(
+                cv, gas_model,
+                temperature_seed=temperature_seed,
+                smoothness_mu=smoothness_mu,
+                smoothness_kappa=smoothness_kappa,
+                smoothness_d=smoothness_d,
+                smoothness_beta=smoothness_beta,
+                material_densities=material_densities,
+                limiter_func=limiter_func,
+                limiter_dd=limiter_dd,
+                outline=False,
+                _force_materialize=False)
 
-    #     return outlined_make_fluid_state(
-    #         cv,
-    #         temperature_seed=temperature_seed,
-    #         smoothness_mu=smoothness_mu,
-    #         smoothness_kappa=smoothness_kappa,
-    #         smoothness_d=smoothness_d,
-    #         smoothness_beta=smoothness_beta,
-    #         material_densities=material_densities)
+        outlined_make_fluid_state = actx.outline(
+            _make_fluid_state, id=outline_id)
+
+        return force_materialize(
+            actx,
+            outlined_make_fluid_state(
+                cv,
+                temperature_seed=temperature_seed,
+                smoothness_mu=smoothness_mu,
+                smoothness_kappa=smoothness_kappa,
+                smoothness_d=smoothness_d,
+                smoothness_beta=smoothness_beta,
+                material_densities=material_densities))
 
     # FIXME work-around for now
     smoothness_mu = (actx.np.zeros_like(cv.mass) if smoothness_mu
@@ -426,9 +430,6 @@ def make_fluid_state(cv, gas_model,
                     cv=cv, temperature_seed=temperature_seed,
                     gas_model=gas_model, dd=limiter_dd)
 
-            if outline:
-                apply_limiter = actx.outline(apply_limiter, id=outline_id)
-
             rv = apply_limiter(cv, temperature_seed)
 
             if isinstance(rv, np.ndarray):
@@ -442,10 +443,6 @@ def make_fluid_state(cv, gas_model,
                     cv=cv, temperature_seed=temperature_seed)
                 pressure = gas_model.eos.pressure(cv=cv, temperature=temperature)
                 return make_obj_array([temperature, pressure])
-
-            if outline:
-                compute_temperature_pressure = actx.outline(
-                    compute_temperature_pressure, id=outline_id)
 
             temperature, pressure = compute_temperature_pressure(cv, temperature_seed)
 
@@ -483,9 +480,6 @@ def make_fluid_state(cv, gas_model,
             else:
                 return make_obj_array([dv])
 
-        if outline:
-            compute_dv_tv = actx.outline(compute_dv_tv, id=outline_id)
-
         dv_tv = compute_dv_tv(cv, temperature, pressure, smoothness_mu,
             smoothness_kappa, smoothness_d, smoothness_beta)
 
@@ -496,7 +490,10 @@ def make_fluid_state(cv, gas_model,
             dv, = dv_tv
             result = FluidState(cv=cv, dv=dv)
 
-        return force_materialize(actx, result)
+        if _force_materialize:
+            return force_materialize(actx, result)
+        else:
+            return result
 
     # TODO ideally, we want to avoid using "gas model" because the name contradicts
     # its usage with solid+fluid.
@@ -525,10 +522,6 @@ def make_fluid_state(cv, gas_model,
 
             return make_obj_array([wv, temperature, pressure])
 
-        if outline:
-            compute_wv_temperature_pressure = actx.outline(
-                compute_wv_temperature_pressure, id=outline_id)
-
         wv, temperature, pressure = compute_wv_temperature_pressure(
             cv, material_densities, temperature_seed)
 
@@ -537,9 +530,6 @@ def make_fluid_state(cv, gas_model,
                 return limiter_func(
                     cv=cv, wv=wv, pressure=pressure, temperature=temperature,
                     dd=limiter_dd)
-
-            if outline:
-                apply_limiter = actx.outline(apply_limiter, id=outline_id)
 
             cv = apply_limiter(cv, wv, pressure, temperature)
 
@@ -562,16 +552,16 @@ def make_fluid_state(cv, gas_model,
 
             return make_obj_array([dv, tv])
 
-        if outline:
-            compute_dv_tv = actx.outline(compute_dv_tv, id=outline_id)
-
         dv, tv = compute_dv_tv(
             cv, wv, temperature, pressure, smoothness_mu, smoothness_kappa,
             smoothness_d, smoothness_beta)
 
-        return force_materialize(
-            actx,
-            PorousFlowFluidState(cv=cv, dv=dv, tv=tv, wv=wv))
+        result = PorousFlowFluidState(cv=cv, dv=dv, tv=tv, wv=wv)
+
+        if _force_materialize:
+            return force_materialize(actx, result)
+        else:
+            return result
 
     else:
         raise TypeError("Invalid type for gas_model")
