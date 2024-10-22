@@ -4,6 +4,7 @@ Viscous Flux Calculation
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autofunction:: viscous_flux
+.. autofunction:: viscous_normal_flux
 .. autofunction:: viscous_stress_tensor
 .. autofunction:: diffusive_flux
 .. autofunction:: conductive_heat_flux
@@ -293,6 +294,53 @@ def viscous_flux(state, grad_cv, grad_t):
             momentum=tau, species_mass=-j)
 
 
+def viscous_normal_flux(
+        state, grad_cv, grad_t, normal, outline=False, outline_id=None):
+    r"""Compute the viscous flux in the direction of *normal*.
+
+    See :func:`viscous_flux` for details on the viscous flux implementation.
+
+    Parameters
+    ----------
+    state: :class:`~mirgecom.gas_model.FluidState`
+
+        Full fluid conserved and thermal state
+
+    grad_cv: :class:`~mirgecom.fluid.ConservedVars`
+
+        Gradient of the fluid state
+
+    grad_t: numpy.ndarray
+
+        Gradient of the fluid temperature
+
+    normal: numpy.ndarray
+
+        The normal vector
+
+    outline: bool
+
+        Outline the body of this function in the array context
+
+    outline_id: Hashable
+
+        Identifier to use when outlining
+
+    Returns
+    -------
+    :class:`~mirgecom.fluid.ConservedVars` or float
+
+        The viscous transport flux if viscous transport properties are provided,
+        scalar zero otherwise.
+    """
+    if outline:
+        outlined_viscous_normal_flux = state.array_context.outline(
+            viscous_normal_flux, id=outline_id)
+        return outlined_viscous_normal_flux(state, grad_cv, grad_t, normal)
+
+    return viscous_flux(state, grad_cv, grad_t) @ normal
+
+
 def viscous_facial_flux_central(dcoll, state_pair, grad_cv_pair, grad_t_pair,
                                 normal=None, gas_model=None):
     r"""Return a central facial flux for the divergence operator.
@@ -343,12 +391,12 @@ def viscous_facial_flux_central(dcoll, state_pair, grad_cv_pair, grad_t_pair,
         actx = state_pair.int.array_context
         normal = geo.normal(actx, dcoll, state_pair.dd)
 
-    f_int = viscous_flux(state_pair.int, grad_cv_pair.int,
-                         grad_t_pair.int)
-    f_ext = viscous_flux(state_pair.ext, grad_cv_pair.ext,
-                         grad_t_pair.ext)
+    f_int = viscous_normal_flux(state_pair.int, grad_cv_pair.int,
+                         grad_t_pair.int, normal, outline=True)
+    f_ext = viscous_normal_flux(state_pair.ext, grad_cv_pair.ext,
+                         grad_t_pair.ext, normal, outline=True)
 
-    return num_flux_central(f_int, f_ext)@normal
+    return num_flux_central(f_int, f_ext)
 
 
 def viscous_facial_flux_harmonic(dcoll, state_pair, grad_cv_pair, grad_t_pair,
@@ -425,14 +473,12 @@ def viscous_facial_flux_harmonic(dcoll, state_pair, grad_cv_pair, grad_t_pair,
         interior=replace_coefs(state_pair.int, kappa=kappa_harmonic_mean),
         exterior=replace_coefs(state_pair.ext, kappa=kappa_harmonic_mean))
 
-    @actx.outline
-    def outlined_viscous_facial_flux(state, grad_cv, grad_t):
-        return viscous_flux(state, grad_cv, grad_t) @ normal
-
-    f_int = outlined_viscous_facial_flux(
-        state_pair_with_harmonic_mean_coefs.int, grad_cv_pair.int, grad_t_pair.int)
-    f_ext = outlined_viscous_facial_flux(
-        state_pair_with_harmonic_mean_coefs.ext, grad_cv_pair.ext, grad_t_pair.ext)
+    f_int = viscous_normal_flux(
+        state_pair_with_harmonic_mean_coefs.int, grad_cv_pair.int, grad_t_pair.int,
+        normal, outline=True)
+    f_ext = viscous_normal_flux(
+        state_pair_with_harmonic_mean_coefs.ext, grad_cv_pair.ext, grad_t_pair.ext,
+        normal, outline=True)
 
     return num_flux_central(f_int, f_ext)
 

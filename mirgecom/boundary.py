@@ -63,7 +63,7 @@ from pytools.obj_array import make_obj_array
 from mirgecom.fluid import make_conserved
 from mirgecom.gas_model import make_fluid_state, replace_fluid_state
 from mirgecom.utils import project_from_base
-from mirgecom.viscous import viscous_facial_flux_central, viscous_flux
+from mirgecom.viscous import viscous_facial_flux_central, viscous_normal_flux
 from mirgecom.inviscid import inviscid_facial_flux_rusanov, inviscid_flux
 
 
@@ -706,9 +706,9 @@ class MengaldoBoundaryCondition(FluidBoundary):
 
         # Note that [Mengaldo_2014]_ uses F_v(Q_bc, dQ_bc) here and
         # *not* the numerical viscous flux as advised by [Bassi_1997]_.
-        f_ext = viscous_flux(state=state_bc, grad_cv=grad_cv_bc,
-                             grad_t=grad_t_bc)
-        return f_ext@normal
+        return viscous_normal_flux(
+            state=state_bc, grad_cv=grad_cv_bc, grad_t=grad_t_bc, normal=normal,
+            outline=True)
 
     def cv_gradient_flux(self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):
         r"""Get the boundary flux for the gradient of the fluid conserved variables.
@@ -1046,7 +1046,8 @@ class DummyBoundary(FluidBoundary):
                                 **kwargs):
         """Get the viscous flux for *dd_bdry* for use in the divergence operator."""
         normal = geo.normal(state_minus.array_context, dcoll, dd_bdry)
-        return viscous_flux(state_minus, grad_cv_minus, grad_t_minus)@normal
+        return viscous_normal_flux(
+            state_minus, grad_cv_minus, grad_t_minus, normal, outline=True)
 
 
 class AdiabaticSlipBoundary(MengaldoBoundaryCondition):
