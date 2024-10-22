@@ -404,8 +404,9 @@ def viscous_facial_flux_harmonic(dcoll, state_pair, grad_cv_pair, grad_t_pair,
     """
     from mirgecom.flux import num_flux_central
 
+    actx = state_pair.int.array_context
+
     if normal is None:
-        actx = state_pair.int.array_context
         normal = geo.normal(actx, dcoll, state_pair.dd)
 
     # TODO: Do this for other coefficients too?
@@ -424,12 +425,16 @@ def viscous_facial_flux_harmonic(dcoll, state_pair, grad_cv_pair, grad_t_pair,
         interior=replace_coefs(state_pair.int, kappa=kappa_harmonic_mean),
         exterior=replace_coefs(state_pair.ext, kappa=kappa_harmonic_mean))
 
-    f_int = viscous_flux(
+    @actx.outline
+    def outlined_viscous_facial_flux(state, grad_cv, grad_t):
+        return viscous_flux(state, grad_cv, grad_t) @ normal
+
+    f_int = outlined_viscous_facial_flux(
         state_pair_with_harmonic_mean_coefs.int, grad_cv_pair.int, grad_t_pair.int)
-    f_ext = viscous_flux(
+    f_ext = outlined_viscous_facial_flux(
         state_pair_with_harmonic_mean_coefs.ext, grad_cv_pair.ext, grad_t_pair.ext)
 
-    return num_flux_central(f_int, f_ext)@normal
+    return num_flux_central(f_int, f_ext)
 
 
 def viscous_flux_on_element_boundary(
@@ -503,18 +508,14 @@ def viscous_flux_on_element_boundary(
 
     # {{{ - Viscous flux helpers -
 
-    # @actx.outline
-    def outlined_viscous_num_flux(state_pair, grad_cv_pair, grad_t_pair, normal):
-        return numerical_flux_func(
-            dcoll=None, gas_model=None, state_pair=state_pair,
-            grad_cv_pair=grad_cv_pair, grad_t_pair=grad_t_pair, normal=normal)
-
     # viscous fluxes across interior faces (including partition and periodic bnd)
     def _fvisc_divergence_flux_interior(state_pair, grad_cv_pair, grad_t_pair):
         normal = geo.normal(actx, dcoll, state_pair.dd)
         return op.project(dcoll,
             state_pair.dd, dd_allfaces_quad,
-            outlined_viscous_num_flux(state_pair, grad_cv_pair, grad_t_pair, normal))
+            numerical_flux_func(
+                dcoll=None, gas_model=None, state_pair=state_pair,
+                grad_cv_pair=grad_cv_pair, grad_t_pair=grad_t_pair, normal=normal))
 
     # viscous part of bcs applied here
     def _fvisc_divergence_flux_boundary(bdtag, boundary, state_minus_quad):

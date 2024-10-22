@@ -144,10 +144,16 @@ def inviscid_facial_flux_rusanov(state_pair, gas_model, normal):
         are being computed.
     """
     actx = state_pair.int.array_context
+
     lam = actx.np.maximum(state_pair.int.wavespeed, state_pair.ext.wavespeed)
+
+    @actx.outline
+    def outlined_inviscid_facial_flux(state):
+        return inviscid_flux(state) @ normal
+
     from mirgecom.flux import num_flux_lfr
-    return num_flux_lfr(f_minus_normal=inviscid_flux(state_pair.int)@normal,
-                        f_plus_normal=inviscid_flux(state_pair.ext)@normal,
+    return num_flux_lfr(f_minus_normal=outlined_inviscid_facial_flux(state_pair.int),
+                        f_plus_normal=outlined_inviscid_facial_flux(state_pair.ext),
                         q_minus=state_pair.int.cv,
                         q_plus=state_pair.ext.cv, lam=lam)
 
@@ -297,15 +303,11 @@ def inviscid_flux_on_element_boundary(
     dd_allfaces_quad = dd_vol_quad.trace(FACE_RESTR_ALL)
     actx = interior_state_pairs[0].int.array_context
 
-    # @actx.outline
-    def outlined_inviscid_num_flux(state_pair, normal):
-        return numerical_flux_func(state_pair, gas_model, normal)
-
     def _interior_flux(state_pair):
         normal = geo.normal(state_pair.int.array_context, dcoll, state_pair.dd)
         return op.project(dcoll,
             state_pair.dd, dd_allfaces_quad,
-            outlined_inviscid_num_flux(state_pair, normal))
+            numerical_flux_func(state_pair, gas_model, normal))
 
     def _boundary_flux(bdtag, boundary, state_minus_quad):
         dd_bdry_quad = dd_vol_quad.with_domain_tag(bdtag)
