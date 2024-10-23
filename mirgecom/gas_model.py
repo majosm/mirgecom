@@ -76,7 +76,7 @@ from mirgecom.transport import (
     TransportModel,
     GasTransportVars
 )
-from mirgecom.utils import normalize_boundaries, force_materialize
+from mirgecom.utils import normalize_boundaries
 from mirgecom.wall_model import PorousWallVars, PorousFlowModel
 
 
@@ -399,16 +399,14 @@ def make_fluid_state(cv, gas_model,
         outlined_make_fluid_state = actx.outline(
             _make_fluid_state, id=outline_id)
 
-        return force_materialize(
-            actx,
-            outlined_make_fluid_state(
-                cv,
-                temperature_seed=temperature_seed,
-                smoothness_mu=smoothness_mu,
-                smoothness_kappa=smoothness_kappa,
-                smoothness_d=smoothness_d,
-                smoothness_beta=smoothness_beta,
-                material_densities=material_densities))
+        return outlined_make_fluid_state(
+            cv,
+            temperature_seed=temperature_seed,
+            smoothness_mu=smoothness_mu,
+            smoothness_kappa=smoothness_kappa,
+            smoothness_d=smoothness_d,
+            smoothness_beta=smoothness_beta,
+            material_densities=material_densities)
 
     # FIXME work-around for now
     smoothness_mu = (actx.np.zeros_like(cv.mass) if smoothness_mu
@@ -485,15 +483,10 @@ def make_fluid_state(cv, gas_model,
 
         if gas_model.transport is not None:
             dv, tv = dv_tv
-            result = ViscousFluidState(cv=cv, dv=dv, tv=tv)
+            return ViscousFluidState(cv=cv, dv=dv, tv=tv)
         else:
             dv, = dv_tv
-            result = FluidState(cv=cv, dv=dv)
-
-        if _force_materialize:
-            return force_materialize(actx, result)
-        else:
-            return result
+            return FluidState(cv=cv, dv=dv)
 
     # TODO ideally, we want to avoid using "gas model" because the name contradicts
     # its usage with solid+fluid.
@@ -556,12 +549,7 @@ def make_fluid_state(cv, gas_model,
             cv, wv, temperature, pressure, smoothness_mu, smoothness_kappa,
             smoothness_d, smoothness_beta)
 
-        result = PorousFlowFluidState(cv=cv, dv=dv, tv=tv, wv=wv)
-
-        if _force_materialize:
-            return force_materialize(actx, result)
-        else:
-            return result
+        return PorousFlowFluidState(cv=cv, dv=dv, tv=tv, wv=wv)
 
     else:
         raise TypeError("Invalid type for gas_model")
