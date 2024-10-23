@@ -76,7 +76,7 @@ from mirgecom.transport import (
     TransportModel,
     GasTransportVars
 )
-from mirgecom.utils import normalize_boundaries
+from mirgecom.utils import normalize_boundaries, force_materialize
 from mirgecom.wall_model import PorousWallVars, PorousFlowModel
 
 
@@ -491,10 +491,12 @@ def make_fluid_state(cv, gas_model,
 
         if gas_model.transport is not None:
             dv, tv = dv_tv
-            return ViscousFluidState(cv=cv, dv=dv, tv=tv)
+            result = ViscousFluidState(cv=cv, dv=dv, tv=tv)
         else:
             dv, = dv_tv
-            return FluidState(cv=cv, dv=dv)
+            result = FluidState(cv=cv, dv=dv)
+
+        return force_materialize(actx, result)
 
     # TODO ideally, we want to avoid using "gas model" because the name contradicts
     # its usage with solid+fluid.
