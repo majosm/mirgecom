@@ -708,7 +708,8 @@ class MengaldoBoundaryCondition(FluidBoundary):
         # *not* the numerical viscous flux as advised by [Bassi_1997]_.
         return viscous_normal_flux(
             state=state_bc, grad_cv=grad_cv_bc, grad_t=grad_t_bc, normal=normal,
-            outline=True)
+            outline=True,
+            outline_id="mfs")
 
     def cv_gradient_flux(self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):
         r"""Get the boundary flux for the gradient of the fluid conserved variables.
@@ -1047,7 +1048,8 @@ class DummyBoundary(FluidBoundary):
         """Get the viscous flux for *dd_bdry* for use in the divergence operator."""
         normal = geo.normal(state_minus.array_context, dcoll, dd_bdry)
         return viscous_normal_flux(
-            state_minus, grad_cv_minus, grad_t_minus, normal, outline=True)
+            state_minus, grad_cv_minus, grad_t_minus, normal, outline=True,
+            outline_id="mfs")
 
 
 class AdiabaticSlipBoundary(MengaldoBoundaryCondition):
@@ -1080,7 +1082,7 @@ class AdiabaticSlipBoundary(MengaldoBoundaryCondition):
         # set the normal momentum to 0
         mom_plus = self._slip.momentum_plus(state_minus.momentum_density, nhat)
         return replace_fluid_state(state_minus, gas_model, momentum=mom_plus,
-            outline=True)
+            outline=True, outline_id="mfs")
 
     def state_bc(self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):
         """Return state with zero normal-component velocity."""
@@ -1100,7 +1102,8 @@ class AdiabaticSlipBoundary(MengaldoBoundaryCondition):
             state_minus, gas_model,
             energy=energy_bc,
             momentum=mom_bc,
-            outline=True)
+            outline=True,
+            outline_id="mfs")
 
     def temperature_bc(self, dcoll, dd_bdry, state_minus, **kwargs):
         """Return temperature for use in grad(temperature)."""
@@ -1211,7 +1214,8 @@ class FarfieldBoundary(MengaldoBoundaryCondition):
                                 smoothness_mu=state_minus.smoothness_mu,
                                 smoothness_kappa=state_minus.smoothness_kappa,
                                 smoothness_beta=state_minus.smoothness_beta,
-                                outline=True)
+                                outline=True,
+                                outline_id="mfs")
 
     def state_bc(self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):
         """Return BC fluid state."""
@@ -1347,7 +1351,8 @@ class PressureOutflowBoundary(MengaldoBoundaryCondition):
                                 smoothness_mu=state_minus.smoothness_mu,
                                 smoothness_kappa=state_minus.smoothness_kappa,
                                 smoothness_beta=state_minus.smoothness_beta,
-                                outline=True)
+                                outline=True,
+                                outline_id="mfs")
 
     def state_bc(self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):
         """Return state."""
@@ -1391,7 +1396,8 @@ class PressureOutflowBoundary(MengaldoBoundaryCondition):
                                 smoothness_mu=state_minus.smoothness_mu,
                                 smoothness_kappa=state_minus.smoothness_kappa,
                                 smoothness_beta=state_minus.smoothness_beta,
-                                outline=True)
+                                outline=True,
+                                outline_id="mfs")
 
     def temperature_bc(self, dcoll, dd_bdry, state_minus, **kwargs):
         """Get temperature value used in grad(T)."""
@@ -1495,7 +1501,8 @@ class RiemannInflowBoundary(MengaldoBoundaryCondition):
                                 smoothness_mu=state_minus.smoothness_mu,
                                 smoothness_kappa=state_minus.smoothness_kappa,
                                 smoothness_beta=state_minus.smoothness_beta,
-                                outline=True)
+                                outline=True,
+                                outline_id="mfs")
 
     def state_bc(self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):
         """Return BC fluid state."""
@@ -1613,7 +1620,8 @@ class RiemannOutflowBoundary(MengaldoBoundaryCondition):
                                 smoothness_mu=state_minus.smoothness_mu,
                                 smoothness_kappa=state_minus.smoothness_kappa,
                                 smoothness_beta=state_minus.smoothness_beta,
-                                outline=True)
+                                outline=True,
+                                outline_id="mfs")
 
     def state_bc(self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):
         """Return BC fluid state."""
@@ -1680,7 +1688,8 @@ class IsothermalSlipWallBoundary(MengaldoBoundaryCondition):
             state_minus, gas_model,
             energy=total_energy_bc,
             momentum=mom_bc,
-            outline=True)
+            outline=True,
+            outline_id="mfs")
 
     def grad_cv_bc(self, dcoll, dd_bdry, gas_model, state_minus, grad_cv_minus,
                    normal, **kwargs):
@@ -1727,7 +1736,8 @@ class IsothermalSlipWallBoundary(MengaldoBoundaryCondition):
         # set the normal momentum to 0
         mom_plus = self._slip.momentum_plus(state_minus.momentum_density, nhat)
         return replace_fluid_state(
-            state_minus, gas_model, momentum=mom_plus, outline=True)
+            state_minus, gas_model, momentum=mom_plus, outline=True,
+            outline_id="mfs")
 
 
 class IsothermalWallBoundary(MengaldoBoundaryCondition):
@@ -1775,7 +1785,8 @@ class IsothermalWallBoundary(MengaldoBoundaryCondition):
             state_minus, gas_model,
             energy=total_energy_bc,
             momentum=mom_bc,
-            outline=True)
+            outline=True,
+            outline_id="mfs")
 
     def grad_cv_bc(
             self, dcoll, dd_bdry, gas_model, state_minus, grad_cv_minus, normal,
@@ -1796,7 +1807,8 @@ class IsothermalWallBoundary(MengaldoBoundaryCondition):
         # Mengaldo Eqn (45)
         mom_plus = self._no_slip.momentum_plus(state_minus.momentum_density)
         return replace_fluid_state(
-            state_minus, gas_model, momentum=mom_plus, outline=True)
+            state_minus, gas_model, momentum=mom_plus, outline=True,
+            outline_id="mfs")
 
 
 class AdiabaticNoslipWallBoundary(MengaldoBoundaryCondition):
@@ -1828,7 +1840,8 @@ class AdiabaticNoslipWallBoundary(MengaldoBoundaryCondition):
         dd_bdry = as_dofdesc(dd_bdry)
         mom_plus = self._no_slip.momentum_plus(state_minus.momentum_density)
         return replace_fluid_state(
-            state_minus, gas_model, momentum=mom_plus, outline=True)
+            state_minus, gas_model, momentum=mom_plus, outline=True,
+            outline_id="mfs")
 
     def state_bc(self, dcoll, dd_bdry, gas_model,
                             state_minus, **kwargs):
@@ -1849,7 +1862,8 @@ class AdiabaticNoslipWallBoundary(MengaldoBoundaryCondition):
             state_minus, gas_model,
             energy=total_energy_bc,
             momentum=mom_bc,
-            outline=True)
+            outline=True,
+            outline_id="mfs")
 
     def grad_cv_bc(self, dcoll, dd_bdry, gas_model, state_minus, grad_cv_minus,
                    normal, **kwargs):
@@ -1985,7 +1999,8 @@ class LinearizedOutflowBoundary(MengaldoBoundaryCondition):
                                 smoothness_mu=state_minus.smoothness_mu,
                                 smoothness_kappa=state_minus.smoothness_kappa,
                                 smoothness_beta=state_minus.smoothness_beta,
-                                outline=True)
+                                outline=True,
+                                outline_id="mfs")
 
     def state_bc(self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):
         """Return BC fluid state."""
@@ -2085,7 +2100,8 @@ class LinearizedInflowBoundary(MengaldoBoundaryCondition):
 
         return make_fluid_state(cv=boundary_cv, gas_model=gas_model,
                                 temperature_seed=state_minus.temperature,
-                                outline=True)
+                                outline=True,
+                                outline_id="mfs")
 
     def state_bc(self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):
         """Return BC fluid state."""

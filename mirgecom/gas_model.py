@@ -866,6 +866,10 @@ def make_operator_fluid_states(
         bdtag: project_fluid_state(
             dcoll, dd_vol, dd_vol_quad.with_domain_tag(bdtag),
             volume_state, gas_model, limiter_func=limiter_func,
+            make_fluid_state_func=partial(
+                make_fluid_state,
+                outline=True,
+                outline_id="mfs"),
             entropy_stable=entropy_stable)
         for bdtag in boundaries
     }
@@ -943,6 +947,10 @@ def make_operator_fluid_states(
         smoothness_d_pairs=smoothness_d_interior_pairs,
         smoothness_beta_pairs=smoothness_beta_interior_pairs,
         material_densities_pairs=material_densities_interior_pairs,
+        make_fluid_state_func=partial(
+            make_fluid_state,
+            outline=True,
+            outline_id="mfs"),
         limiter_func=limiter_func)
 
     # Interpolate the fluid state to the volume quadrature grid
