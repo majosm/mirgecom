@@ -1224,7 +1224,7 @@ class FarfieldBoundary(MengaldoBoundaryCondition):
     def temperature_bc(self, dcoll, dd_bdry, state_minus, **kwargs):
         """Return farfield temperature for use in grad(temperature)."""
         actx = state_minus.array_context
-        return actx.np.zeros_like(state_minus.temperature) + self._temperature
+        return actx.np.zeros_like(state_minus.mass_density) + self._temperature
 
     def grad_cv_bc(self, dcoll, dd_bdry, gas_model, state_minus, grad_cv_minus,
                    normal, **kwargs):
@@ -1367,7 +1367,7 @@ class PressureOutflowBoundary(MengaldoBoundaryCondition):
         gamma = gas_model.eos.gamma(state_minus.cv, state_minus.temperature)
 
         # evaluate internal energy based on prescribed pressure
-        pressure_plus = self._pressure + actx.np.zeros_like(state_minus.pressure)
+        pressure_plus = self._pressure + actx.np.zeros_like(state_minus.mass_density)
         if state_minus.is_mixture:
             gas_const = gas_model.eos.gas_const(
                 species_mass_fractions=state_minus.cv.species_mass_fractions)
@@ -1665,7 +1665,7 @@ class IsothermalSlipWallBoundary(MengaldoBoundaryCondition):
         """Get temperature value used in grad(T)."""
         actx = state_minus.array_context
         wall_temp = project_from_base(dcoll, dd_bdry, self._wall_temp)
-        return actx.np.zeros_like(state_minus.temperature) + wall_temp
+        return actx.np.zeros_like(state_minus.mass_density) + wall_temp
 
     def state_bc(self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):
         """Return BC fluid state."""
@@ -1764,7 +1764,7 @@ class IsothermalWallBoundary(MengaldoBoundaryCondition):
         """Get temperature value used in grad(T)."""
         actx = state_minus.array_context
         wall_temp = project_from_base(dcoll, dd_bdry, self._wall_temp)
-        return actx.np.zeros_like(state_minus.temperature) + wall_temp
+        return actx.np.zeros_like(state_minus.mass_density) + wall_temp
 
     def state_bc(self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):
         """Return BC fluid state."""
