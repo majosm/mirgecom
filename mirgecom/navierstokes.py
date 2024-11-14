@@ -214,6 +214,91 @@ def grad_cv_operator(
                                    exterior=state_pair.ext.cv)
                          for state_pair in inter_elem_bnd_states_quad]
 
+    from mpi4py import MPI
+    rank = MPI.COMM_WORLD.rank
+
+    if rank == 0:
+        # Domain boundaries
+        bnd_fluxes_unprojected = {
+            bdtag: bdry.cv_gradient_flux(
+                dcoll,
+                dd_vol_quad.with_domain_tag(bdtag),
+                gas_model=gas_model,
+                state_minus=domain_bnd_states_quad[bdtag],
+                time=time,
+                numerical_flux_func=numerical_flux_func)
+            for bdtag, bdry in boundaries.items()}
+
+        # Domain boundaries
+        bnd_fluxes = {
+            bdtag: op.project(
+                dcoll, dd_vol_quad.with_domain_tag(bdtag),
+                dd_allfaces_quad,
+                bnd_fluxes_unprojected[bdtag])
+            for bdtag, bdry in boundaries.items()}
+
+        for bdtag, bnd_flux in bnd_fluxes.items():
+            from pytato import Array
+            for idim in range(state.dim):
+                assert isinstance(bnd_flux.mass[idim][0], Array), f"{bnd_flux.mass[idim]=}, {domain_bnd_states_quad[bdtag].mass_density[idim].shape=}"
+                assert isinstance(bnd_flux.energy[idim][0], Array), f"{bnd_flux.energy[idim]=}, {domain_bnd_states_quad[bdtag].energy_density[idim].shape=}"
+                assert isinstance(bnd_flux.momentum[idim, 0][0], Array), f"{bnd_flux.momentum[idim, 0]=}, {domain_bnd_states_quad[bdtag].momentum_density[idim, 0][0].shape=}"
+                assert isinstance(bnd_flux.momentum[idim, 1][0], Array), f"{bnd_flux.momentum[idim, 1]=}, {domain_bnd_states_quad[bdtag].momentum_density[idim, 1][0].shape=}"
+
+        bnd_flux_sum1 = 0
+        for bnd_flux in bnd_fluxes.values():
+            bnd_flux_sum1 = bnd_flux_sum1 + bnd_flux
+        bnd_flux_sum2 = sum(bnd_fluxes.values())
+        from pytato.analysis import get_num_nodes
+        for idim in range(state.dim):
+            assert bnd_flux_sum2.mass[idim][0] == bnd_flux_sum1.mass[idim][0], f"{get_num_nodes(bnd_flux_sum1.mass[idim][0])=}, {get_num_nodes(bnd_flux_sum2.mass[idim][0])=}"
+            assert bnd_flux_sum2.energy[idim][0] == bnd_flux_sum1.energy[idim][0], f"{get_num_nodes(bnd_flux_sum1.energy[idim][0])=}, {get_num_nodes(bnd_flux_sum2.energy[idim][0])=}"
+            assert bnd_flux_sum2.momentum[idim, 0][0] == bnd_flux_sum1.momentum[idim, 0][0], f"{get_num_nodes(bnd_flux_sum1.momentum[idim, 0][0])=}, {get_num_nodes(bnd_flux_sum2.momentum[idim, 0][0])=}"
+            assert bnd_flux_sum2.momentum[idim, 1][0] == bnd_flux_sum1.momentum[idim, 1][0], f"{get_num_nodes(bnd_flux_sum1.momentum[idim, 1][0])=}, {get_num_nodes(bnd_flux_sum2.momentum[idim, 1][0])=}"
+            assert isinstance(bnd_flux_sum2.mass[idim][0], Array), f"{bnd_flux_sum2.mass[idim]=}"
+            assert isinstance(bnd_flux_sum2.energy[idim][0], Array), f"{bnd_flux_sum2.energy[idim]=}"
+            assert isinstance(bnd_flux_sum2.momentum[idim, 0][0], Array), f"{bnd_flux_sum2.momentum[idim, 0]=}"
+            assert isinstance(bnd_flux_sum2.momentum[idim, 1][0], Array), f"{bnd_flux_sum2.momentum[idim, 1]=}"
+
+        for bdtag in boundaries:
+            bnd_flux_unprojected_dag = {}
+            bnd_flux_dag = {}
+
+            def unpack_unprojected(keys, subary):
+                bnd_flux_unprojected_dag[keys] = subary
+                return subary
+
+            def unpack(keys, subary):
+                bnd_flux_dag[keys] = subary
+                return subary
+
+            from arraycontext.container.traversal import rec_keyed_map_array_container
+            rec_keyed_map_array_container(unpack_unprojected, bnd_fluxes_unprojected[bdtag])
+            rec_keyed_map_array_container(unpack, bnd_fluxes[bdtag])
+
+            from pytato import make_dict_of_named_arrays
+            bnd_flux_unprojected_dag = make_dict_of_named_arrays(bnd_flux_unprojected_dag)
+            bnd_flux_dag = make_dict_of_named_arrays(bnd_flux_dag)
+
+            from pytato.analysis import get_node_type_counts
+            print(f"grad_cv_operator: {get_node_type_counts(bnd_flux_unprojected_dag)=}")
+            print(f"grad_cv_operator: {get_node_type_counts(bnd_flux_dag)=}")
+
+        bnd_flux_sum2_dag = {}
+
+        def unpack(keys, subary):
+            bnd_flux_sum2_dag[keys] = subary
+            return subary
+
+        from arraycontext.container.traversal import rec_keyed_map_array_container
+        rec_keyed_map_array_container(unpack, bnd_flux_sum2)
+
+        from pytato import make_dict_of_named_arrays
+        bnd_flux_sum2_dag = make_dict_of_named_arrays(bnd_flux_sum2_dag)
+
+        # from pytato.analysis import get_node_type_counts
+        print(f"grad_cv_operator: {bnd_flux_sum2_dag=}")
+
     cv_flux_bnd = (
 
         # Domain boundaries
@@ -233,8 +318,6 @@ def grad_cv_operator(
         + sum(get_interior_flux(tpair) for tpair in cv_interior_pairs)
     )
 
-    from mpi4py import MPI
-    rank = MPI.COMM_WORLD.rank
     MPI.COMM_WORLD.barrier() 
     for other_rank in range(MPI.COMM_WORLD.size):
         if other_rank == rank:
@@ -244,8 +327,26 @@ def grad_cv_operator(
         MPI.COMM_WORLD.barrier() 
 
     # [Bassi_1997]_ eqn 15 (s = grad_q)
-    return grad_operator(
+    result = grad_operator(
         dcoll, dd_vol_quad, dd_allfaces_quad, vol_state_quad.cv, cv_flux_bnd)
+
+    if rank == 0:
+        result_dag = {}
+
+        def unpack(keys, subary):
+            result_dag[keys] = subary
+            return subary
+
+        from arraycontext.container.traversal import rec_keyed_map_array_container
+        rec_keyed_map_array_container(unpack, result)
+
+        from pytato import make_dict_of_named_arrays
+        result_dag = make_dict_of_named_arrays(result_dag)
+
+        from pytato.analysis import get_node_type_counts
+        print(f"grad_cv_operator: {get_node_type_counts(result_dag)=}")
+
+    return result
 
 
 def grad_t_operator(

@@ -170,7 +170,7 @@ def main(actx_class, rst_filename=None, use_tpe=False,
 
     # {{{ Some discretization parameters
 
-    dim = 3
+    dim = 2
     order = 1
 
     # - scales the size of the domain
@@ -182,7 +182,7 @@ def main(actx_class, rst_filename=None, use_tpe=False,
     domain_xlen = .01
     domain_ylen = .01
     domain_zlen = .01
-    chlen = .0025  # default to 4 elements/axis = x_len/chlen
+    chlen = .001  # default to 4 elements/axis = x_len/chlen
 
     # }}} discretization params
 
@@ -216,7 +216,7 @@ def main(actx_class, rst_filename=None, use_tpe=False,
 
     dummy_rhs_only = 0
     timestepping_on = 1
-    av_on = 1
+    av_on = 0
     sponge_on = 1
     health_pres_min = 0.
     health_pres_max = 10000000.
@@ -564,7 +564,8 @@ def main(actx_class, rst_filename=None, use_tpe=False,
         box_ll = (xleft, ybottom, zback)
         box_ur = (xright, ytop, zfront)
 
-    periodic = (periodic_boundary == 1,)*dim
+    # periodic = (periodic_boundary == 1,)*dim
+    periodic = (False, periodic_boundary)
     if rank == 0:
         print(f"---- Mesh generator inputs -----\n"
               f"\tDomain: [{box_ll}, {box_ur}], {periodic=}\n"
@@ -848,13 +849,19 @@ def main(actx_class, rst_filename=None, use_tpe=False,
         wall = isothermal_wall
 
     boundaries = {}  # periodic-compatible
-    if not periodic:
-        if multiple_boundaries:
-            for idir in range(dim):
-                boundaries[BoundaryDomainTag(f"+{idir}")] = wall
-                boundaries[BoundaryDomainTag(f"-{idir}")] = wall
-        else:
-            boundaries = {BTAG_ALL: wall}
+    # if not all(periodic):
+    #     if multiple_boundaries:
+    #         for idir in range(dim):
+    #             boundaries[BoundaryDomainTag(f"+{idir}")] = wall
+    #             boundaries[BoundaryDomainTag(f"-{idir}")] = wall
+    #     else:
+    #         boundaries = {BTAG_ALL: wall}
+    for idir in range(dim):
+        if periodic[idir]:
+            continue
+        boundaries[BoundaryDomainTag(f"+{idir+1}")] = wall
+        boundaries[BoundaryDomainTag(f"-{idir+1}")] = wall
+    assert boundaries
 
     if boundary_report:
         from mirgecom.simutil import boundary_report
@@ -890,6 +897,21 @@ def main(actx_class, rst_filename=None, use_tpe=False,
     current_fluid_state = construct_fluid_state(current_cv, temperature_seed)
     current_dv = current_fluid_state.dv
     temperature_seed = current_dv.temperature
+
+    from mirgecom.navierstokes import grad_cv_operator
+
+    def _grad_cv_operator(fluid_state, time):
+        return grad_cv_operator(dcoll=dcoll, gas_model=gas_model,
+                                boundaries=boundaries,
+                                state=fluid_state,
+                                time=time,
+                                quadrature_tag=quadrature_tag)
+
+    grad_cv_operator_compiled = actx.compile(_grad_cv_operator)
+
+    grad_cv_init = grad_cv_operator_compiled(current_fluid_state, 0.)
+
+    1/0
 
     if sponge_on:
         sponge_sigma = InitSponge(x0=sponge_x0, thickness=sponge_thickness,
@@ -1105,7 +1127,6 @@ def main(actx_class, rst_filename=None, use_tpe=False,
 
     from mirgecom.flux import num_flux_central
     from mirgecom.gas_model import make_operator_fluid_states
-    from mirgecom.navierstokes import grad_cv_operator
 
     def cfd_rhs(t, state):
         cv, tseed = state
