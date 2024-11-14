@@ -233,6 +233,16 @@ def grad_cv_operator(
         + sum(get_interior_flux(tpair) for tpair in cv_interior_pairs)
     )
 
+    from mpi4py import MPI
+    rank = MPI.COMM_WORLD.rank
+    MPI.COMM_WORLD.barrier() 
+    for other_rank in range(MPI.COMM_WORLD.size):
+        if other_rank == rank:
+            print(f"{rank}: {len(cv_interior_pairs)=}, {len(boundaries)=}")
+            print(f"{rank}: {[st_pair.int.mass_density[0].shape for st_pair in inter_elem_bnd_states_quad]=}")
+            print(f"{rank}: {[st.mass_density[0].shape for st in domain_bnd_states_quad.values()]=}")
+        MPI.COMM_WORLD.barrier() 
+
     # [Bassi_1997]_ eqn 15 (s = grad_q)
     return grad_operator(
         dcoll, dd_vol_quad, dd_allfaces_quad, vol_state_quad.cv, cv_flux_bnd)
