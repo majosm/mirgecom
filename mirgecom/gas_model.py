@@ -396,6 +396,7 @@ def make_fluid_state(cv, gas_model,
                 outline=False,
                 _force_materialize=False)
 
+        assert outline_id is not None
         outlined_make_fluid_state = actx.outline(
             _make_fluid_state, id=outline_id)
 
