@@ -383,7 +383,8 @@ class InterfaceFluidSlipBoundary(InterfaceFluidBoundary):
 
         # Don't bother replacing kappa since this is just for inviscid
         return replace_fluid_state(
-            state_minus, gas_model, momentum=mom_plus, outline=True)
+            state_minus, gas_model, momentum=mom_plus, outline=True,
+            outline_id="mfs")
 
     def state_bc(
             self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):  # noqa: D102
@@ -419,7 +420,8 @@ class InterfaceFluidSlipBoundary(InterfaceFluidBoundary):
                 energy=total_energy_bc,
                 momentum=mom_bc,
                 temperature_seed=t_bc,
-                outline=True),
+                outline=True,
+                outline_id="mfs"),
             kappa_bc)
 
     def grad_cv_bc(
@@ -523,7 +525,8 @@ class InterfaceFluidNoslipBoundary(InterfaceFluidBoundary):
 
         # Don't bother replacing kappa since this is just for inviscid
         return replace_fluid_state(
-            state_minus, gas_model, momentum=mom_plus, outline=True)
+            state_minus, gas_model, momentum=mom_plus, outline=True,
+            outline_id="mfs")
 
     def state_bc(
             self, dcoll, dd_bdry, gas_model, state_minus, **kwargs):  # noqa: D102
@@ -550,7 +553,8 @@ class InterfaceFluidNoslipBoundary(InterfaceFluidBoundary):
                 state_minus, gas_model,
                 energy=total_energy_bc,
                 momentum=mom_bc,
-                outline=True),
+                outline=True,
+                outline_id="mfs"),
             kappa_bc)
 
     def grad_cv_bc(
