@@ -59,18 +59,18 @@ def _compile_rhs(actx, rhs):
     return get_rhs()
 
 
-def _is_unevaluated(actx, ary):
-    """Check if an array contains an unevaluated :module:`pytato` expression."""
+def _is_evaluated(actx, ary):
+    """Check if an array contains only evaluated :module:`pytato` expressions."""
     from arraycontext import serialize_container, NotAnArrayContainerError
     try:
         iterable = serialize_container(ary)
         for _, subary in iterable:
-            if _is_unevaluated(actx, subary):
-                return True
-        return False
+            if not _is_evaluated(actx, subary):
+                return False
+        return True
     except NotAnArrayContainerError:
         import pytato as pt
-        return isinstance(ary, pt.Array) and not isinstance(ary, pt.DataWrapper)
+        return not isinstance(ary, pt.Array) or isinstance(ary, pt.DataWrapper)
 
 
 def _advance_state_stepper_func(rhs, timestepper, state, t_final, dt=0,
@@ -157,14 +157,15 @@ def _advance_state_stepper_func(rhs, timestepper, state, t_final, dt=0,
 
         if pre_step_callback is not None:
             state, dt = pre_step_callback(state=state, step=istep, t=t, dt=dt)
-
-        if force_eval:
-            state = force_evaluation(actx, state)
+            assert _is_evaluated(actx, state), \
+                "Unevaluated state returned from pre-step callback"
+            assert _is_evaluated(actx, dt), \
+                "Unevaluated dt returned from pre-step callback"
 
         state = timestepper(state=state, t=t, dt=dt, rhs=maybe_compiled_rhs)
 
         if force_eval is None:
-            if _is_unevaluated(actx, state):
+            if not _is_evaluated(actx, state):
                 force_eval = True
                 from warnings import warn
                 warn(
@@ -181,9 +182,7 @@ def _advance_state_stepper_func(rhs, timestepper, state, t_final, dt=0,
         istep += 1
 
         if local_dt:
-            dt = force_evaluation(actx, dt)
-            t = force_evaluation(actx, t)
-            t = t + dt
+            t = force_evaluation(actx, t + dt)
             marching_loc = istep
         else:
             t += dt
@@ -191,6 +190,10 @@ def _advance_state_stepper_func(rhs, timestepper, state, t_final, dt=0,
 
         if post_step_callback is not None:
             state, dt = post_step_callback(state=state, step=istep, t=t, dt=dt)
+            assert _is_evaluated(actx, state), \
+                "Unevaluated state returned from post-step callback"
+            assert _is_evaluated(actx, dt), \
+                "Unevaluated dt returned from post-step callback"
 
     return istep, t, state
 
@@ -266,11 +269,12 @@ def _advance_state_leap(rhs, timestepper, state, t_final, dt=0,
             state, dt = pre_step_callback(state=state,
                                           step=istep,
                                           t=t, dt=dt)
+            assert _is_evaluated(actx, state), \
+                "Unevaluated state returned from pre-step callback"
+            assert _is_evaluated(actx, dt), \
+                "Unevaluated dt returned from pre-step callback"
             stepper_cls.state = state
             stepper_cls.dt = dt
-
-        if force_eval:
-            state = force_evaluation(actx, state)
 
         # Leap interface here is *a bit* different.
         for event in stepper_cls.run(t_end=t+dt):
@@ -278,7 +282,7 @@ def _advance_state_leap(rhs, timestepper, state, t_final, dt=0,
                 state = event.state_component
 
                 if force_eval is None:
-                    if _is_unevaluated(actx, state):
+                    if not _is_evaluated(actx, state):
                         force_eval = True
                         from warnings import warn
                         warn(
@@ -300,6 +304,10 @@ def _advance_state_leap(rhs, timestepper, state, t_final, dt=0,
                     state, dt = post_step_callback(state=state,
                                                    step=istep,
                                                    t=t, dt=dt)
+                    assert _is_evaluated(actx, state), \
+                        "Unevaluated state returned from post-step callback"
+                    assert _is_evaluated(actx, dt), \
+                        "Unevaluated dt returned from post-step callback"
                     stepper_cls.state = state
                     stepper_cls.dt = dt
 
