@@ -316,6 +316,97 @@ def main(actx_class, use_esdg=False, use_overintegration=False,
     from grudge.dt_utils import characteristic_lengthscales
     wall_lengthscales = characteristic_lengthscales(actx, dcoll, dd=dd_vol_wall)
 
+
+
+
+    fluid_nodes = actx.thaw(dcoll.nodes(dd_vol_fluid))
+    wall_nodes = actx.thaw(dcoll.nodes(dd_vol_wall))
+
+
+
+
+
+
+
+
+
+
+    # smooth_char_length_alpha = 0.025
+
+    # from grudge.dt_utils import characteristic_lengthscales
+    # char_length_fluid = force_evaluation(actx,
+    #     characteristic_lengthscales(actx, dcoll, dd=dd_vol_fluid))
+
+    # # put the lengths on the nodes vs elements
+    # xpos_fluid = fluid_nodes[0]
+    # char_length_fluid = char_length_fluid + actx.np.zeros_like(xpos_fluid)
+
+    # smoothness_diffusivity = \
+    #     smooth_char_length_alpha*char_length_fluid**2/current_dt
+
+    # xpos_wall = wall_nodes[0]
+    # char_length_wall = force_evaluation(actx,
+    #     characteristic_lengthscales(actx, dcoll, dd=dd_vol_wall))
+    # xpos_wall = wall_nodes[0]
+    # char_length_wall = char_length_wall + actx.np.zeros_like(xpos_wall)
+
+    # def compute_smoothed_char_length(href_fluid, comm_ind):
+    #     # regular boundaries
+
+    #     smooth_neumann = NeumannDiffusionBoundary(0)
+    #     fluid_smoothness_boundaries = {}
+    #     for bnd_name in bndry_config:
+    #         if bndry_config[bnd_name] != "none":
+    #             fluid_smoothness_boundaries[bndry_elements[bnd_name]] =\
+    #                 smooth_neumann
+
+    #     if use_wall:
+    #         fluid_smoothness_boundaries.update({
+    #              dd_bdry.domain_tag: NeumannDiffusionBoundary(0)
+    #              for dd_bdry in filter_part_boundaries(
+    #                  dcoll, volume_dd=dd_vol_fluid, neighbor_volume_dd=dd_vol_wall)})
+
+    #     smooth_href_fluid_rhs = diffusion_operator(
+    #         dcoll, smoothness_diffusivity, fluid_smoothness_boundaries,
+    #         href_fluid,
+    #         quadrature_tag=quadrature_tag, dd=dd_vol_fluid,
+    #         comm_tag=(_SmoothCharDiffFluidCommTag, comm_ind))*current_dt
+
+    #     return smooth_href_fluid_rhs
+
+    # compute_smoothed_char_length_compiled = \
+    #     actx.compile(compute_smoothed_char_length)
+
+    # smoothed_char_length_fluid = char_length_fluid
+
+    # if use_smoothed_char_length:
+    #     for i in range(smooth_char_length):
+    #         smoothed_char_length_fluid_rhs = \
+    #             compute_smoothed_char_length_compiled(smoothed_char_length_fluid, i)
+    #         smoothed_char_length_fluid = smoothed_char_length_fluid + \
+    #                                      smoothed_char_length_fluid_rhs
+
+    #     """
+    #     if use_wall:
+    #         smoothed_char_length_wall = char_length_wall
+    #         for i in range(smooth_char_length):
+    #             smoothed_char_length_wall_rhs = \
+    #                 compute_smoothed_char_length_wall_compiled(
+    #                     smoothed_char_length_wall, i)
+    #             smoothed_char_length_wall = smoothed_char_length_wall + \
+    #                                         smoothed_char_length_wall_rhs
+    #     """
+
+    #     smoothed_char_length_fluid = force_evaluation(actx,
+    #                                                   smoothed_char_length_fluid)
+
+
+
+
+
+
+
+
     initname = "thermally-coupled"
     eosname = eos.__class__.__name__
     init_message = make_init_message(dim=dim, order=order,
@@ -388,26 +479,28 @@ def main(actx_class, use_esdg=False, use_overintegration=False,
             fluid_state = construct_fluid_state(cv)
         dv = fluid_state.dv
 
-        (
-            fluid_rhs, wall_rhs, grad_cv, fluid_grad_temperature,
-            wall_grad_temperature) = construct_rhs_and_gradients(t, state)
+        # (
+        #     fluid_rhs, wall_rhs, grad_cv, fluid_grad_temperature,
+        #     wall_grad_temperature) = construct_rhs_and_gradients(t, state)
 
         fluid_viz_fields = [
             ("cv", cv),
             ("dv", dv),
-            ("grad_cv_mass", grad_cv.mass),
-            ("grad_cv_energy", grad_cv.energy),
-            ("grad_cv_momentum_x", grad_cv.momentum[0]),
-            ("grad_cv_momentum_y", grad_cv.momentum[1]),
-            ("grad_t", fluid_grad_temperature),
-            ("rhs", fluid_rhs),
+            # ("grad_cv_mass", grad_cv.mass),
+            # ("grad_cv_energy", grad_cv.energy),
+            # ("grad_cv_momentum_x", grad_cv.momentum[0]),
+            # ("grad_cv_momentum_y", grad_cv.momentum[1]),
+            # ("grad_t", fluid_grad_temperature),
+            # ("rhs", fluid_rhs),
             ("kappa", fluid_state.thermal_conductivity),
+            ("rank", rank),
         ]
         wall_viz_fields = [
             ("temperature", wall_temperature),
-            ("grad_t", wall_grad_temperature),
-            ("rhs", wall_rhs),
+            # ("grad_t", wall_grad_temperature),
+            # ("rhs", wall_rhs),
             ("kappa", wall_kappa),
+            ("rank", rank),
         ]
         from mirgecom.simutil import write_visfile
         write_visfile(
@@ -509,8 +602,6 @@ def main(actx_class, use_esdg=False, use_overintegration=False,
             logmgr.tick_after()
         return state, dt
 
-    fluid_nodes = actx.thaw(dcoll.nodes(dd_vol_fluid))
-
     def my_rhs(t, state, return_gradients=False):
         fluid_state = make_fluid_state(cv=state[0], gas_model=gas_model)
         wall_temperature = state[1]
@@ -558,6 +649,9 @@ def main(actx_class, use_esdg=False, use_overintegration=False,
     construct_rhs_and_gradients = actx.compile(my_rhs_and_gradients)
 
     current_dt = my_get_timestep(step=current_step, t=current_t, state=current_state)
+
+    my_write_viz(step=current_step, t=current_t, state=current_state)
+    1/0
 
     current_step, current_t, current_state = \
         advance_state(rhs=my_rhs, timestepper=timestepper,

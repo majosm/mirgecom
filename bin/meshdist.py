@@ -177,6 +177,19 @@ def main(actx_class, mesh_source=None, ndist=None, dim=None,
         mesh, tag_to_elements = read_gmsh(
             mesh_source, force_ambient_dim=dim,
             return_tag_to_elements_map=True)
+            # return_tag_to_elements_map=True,
+            # mesh_construction_kwargs={
+            #     "skip_tests": True,
+            #     "force_positive_orientation": True})
+        # volume_to_tags = {
+        #     "Fluid": ["Lower"]}
+        # if use_wall:
+        #     volume_to_tags["Wall"] = ["Upper"]
+        # else:
+        #     from mirgecom.simutil import extract_volumes
+        #     mesh, tag_to_elements = extract_volumes(
+        #         mesh, tag_to_elements, volume_to_tags["Fluid"],
+        #         "Upper")
         volume_to_tags = {
             "fluid": ["fluid"]}
         if use_wall:

@@ -1339,6 +1339,16 @@ def distribute_mesh_pkl(comm, get_mesh_data, filename="mesh",
             rank_per_element = partition_generator_func(mesh, tag_to_elements,
                                                         num_target_ranks)
 
+        # elems_per_rank = {}
+        # for iel, r in enumerate(rank_per_element):
+        #     elems = elems_per_rank.setdefault(r, 0)
+        #     elems += 1
+        # assert len(elems_per_rank) == num_target_ranks
+        # print("")
+        # for r in range(num_target_ranks):
+        #     print(f"{r}: {elems_per_rank[r]}")
+        # print("")
+
         # Save this little puppy for later (m-to-n restart support)
         if reader_rank == 0:
             part_table_fname = filename + f"_decomp_np{num_target_ranks}.pkl"

@@ -52,27 +52,48 @@ def main(mesh_filename=None, output_path=None):
             with open(mesh_pkl_filename, "rb") as pkl_file:
                 global_nelements, volume_to_local_mesh_data = \
                     pickle.load(pkl_file)
+            assert volume_to_local_mesh_data
             for vol, meshdat in volume_to_local_mesh_data.items():
+                if r == 43:
+                    print(f"{vol=}")
+                    print(f"{meshdat[0].nelements=}")
                 local_partid = PartID(volume_tag=vol, rank=r)
                 volumes.add(vol)
                 connected_parts = get_connected_parts(meshdat[0])
                 if connected_parts:
                     intradecomp_map[local_partid] = connected_parts
+                    has_remote_neighbors = False
+                    for nbr in connected_parts:
+                        if nbr.rank != r:
+                            has_remote_neighbors = True
+                            break
+                    assert has_remote_neighbors
+                else:
+                    assert meshdat[0].nelements == 0
         else:
             break
     nvolumes = len(volumes)
-    rank_rank_nbrs = {r: set() for r in range(nranks)}
+    rank_rank_nbrs = {}
     for part, nbrs in intradecomp_map.items():
         local_rank = part.rank
         for nbr in nbrs:
             if nbr.rank != local_rank:
-                rank_rank_nbrs[local_rank].add(nbr.rank)
+                rank_rank_nbrs.setdefault(local_rank, set()).add(nbr.rank)
+    assert len(rank_rank_nbrs) == nranks
+    print("")
+    for r in range(nranks):
+        try:
+            print(f"{r}: {rank_rank_nbrs[r]}")
+        except KeyError:
+            print(f"{r}: NOT FOUND")
+    print("")
     min_rank_nbrs = nranks
     max_rank_nbrs = 0
     num_nbr_dist = {}
     total_nnbrs = 0
-    for _, rank_nbrs in rank_rank_nbrs.items():
+    for r, rank_nbrs in rank_rank_nbrs.items():
         nrank_nbrs = len(rank_nbrs)
+        assert nrank_nbrs > 0
         total_nnbrs += nrank_nbrs
         if nrank_nbrs not in num_nbr_dist:
             num_nbr_dist[nrank_nbrs] = 0
