@@ -143,7 +143,8 @@ def _advance_state_stepper_func(rhs, timestepper, state, t_final, dt=0,
     if marching_loc >= marching_limit:
         return istep, t, state
 
-    state = force_evaluation(actx, state)
+    if force_eval:
+        state = force_evaluation(actx, state)
 
     if compile_rhs:
         maybe_compiled_rhs = _compile_rhs(actx, rhs)
