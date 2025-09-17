@@ -91,7 +91,6 @@ import pyopencl as cl
 from arraycontext import tag_axes
 from meshmode.transform_metadata import (
     DiscretizationElementAxisTag,
-    DiscretizationDOFAxisTag
 )
 from arraycontext import flatten, map_array_container
 from grudge.discretization import (
@@ -511,13 +510,10 @@ def compare_fluid_solutions(dcoll, red_state, blue_state, *, dd=DD_VOLUME_ALL):
     .. note::
         This is a collective routine and must be called by all MPI ranks.
     """
-    # added tag_axes calls to eliminate fallback warnings at compile time
     actx = red_state.array_context
-    resid = tag_axes(actx,
-                     {
-                         0: DiscretizationElementAxisTag(),
-                         1: DiscretizationDOFAxisTag()
-                     }, red_state - blue_state)
+    discr = dcoll.discr_from_dd(dd)
+
+    resid = discr.tag_dof_array_axes(actx, red_state - blue_state)
     resid_errs = actx.to_numpy(
         tag_axes(actx,
                  {

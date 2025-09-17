@@ -490,7 +490,7 @@ def smoothness_indicator(dcoll, u, kappa=1.0, s0=-6.0, dd=DD_VOLUME_ALL):
             data=tuple(
                 actx.tag_axis(
                     1,
-                    DiscretizationDOFAxisTag(),
+                    DiscretizationDOFAxisTag(grp.discretization_key()),
                     actx.np.broadcast_to(
                         ((actx.einsum("ek,k->e",
                                       uhat[igrp]**2,

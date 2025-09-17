@@ -187,7 +187,5 @@ def mask_from_elements(dcoll, dd, actx, elements):
         grp_ary_np[grp_elems] = 1
         group_arrays.append(actx.from_numpy(grp_ary_np))
 
-    return tag_axes(actx, {
-        0: DiscretizationElementAxisTag(),
-        1: DiscretizationDOFAxisTag()
-    }, DOFArray(actx, tuple(group_arrays)))
+    return discr.tag_dof_array_axes(
+        actx, DOFArray(actx, tuple(group_arrays)))
