@@ -1875,19 +1875,23 @@ def get_reasonable_memory_pool(ctx: cl.Context, queue: cl.CommandQueue,
 
     if force_buffer and force_non_pool:
         logger.info(f"Using non-pooled CL buffer allocations on {queue.device}.")
+        print(f"Using non-pooled CL buffer allocations on {queue.device}.")
         return cl_tools.DeferredAllocator(ctx)
 
     if force_buffer:
         logger.info(f"Using pooled CL buffer allocations on {queue.device}.")
+        print(f"Using pooled CL buffer allocations on {queue.device}.")
         return cl_tools.MemoryPool(cl_tools.ImmediateAllocator(queue))
 
     if force_non_pool and has_coarse_grain_buffer_svm(queue.device):
         logger.info(f"Using non-pooled SVM allocations on {queue.device}.")
+        print(f"Using non-pooled SVM allocations on {queue.device}.")
         return cl_tools.SVMAllocator(  # pylint: disable=no-member
             ctx, alignment=0, queue=queue)
 
     if has_coarse_grain_buffer_svm(queue.device) and hasattr(cl_tools, "SVMPool"):
         logger.info(f"Using SVM-based memory pool on {queue.device}.")
+        print(f"Using SVM-based memory pool on {queue.device}.")
         return cl_tools.SVMPool(cl_tools.SVMAllocator(  # pylint: disable=no-member
             ctx, alignment=0, queue=queue))
     else:
